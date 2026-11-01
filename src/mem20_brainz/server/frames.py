@@ -2,7 +2,7 @@
 
 This module owns the *schema* and nothing else. It contains no simulation
 logic: it takes already-computed arrays and packs them for the wire. That
-separation is the point of ADR-0009 — the server orchestrates and serialises,
+separation is the point of ADR-0007 — the server orchestrates and serialises,
 the engine computes.
 
 Design constraints

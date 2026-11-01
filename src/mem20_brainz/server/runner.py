@@ -4,7 +4,7 @@ This module advances the engine and assembles frames. It deliberately contains
 **no simulation arithmetic**: every voltage update happens inside the
 :class:`~mem20_brainz.simulation.backend.Backend` behind
 :class:`~mem20_brainz.simulation.backend.VectorizedEngine`. If you find yourself
-writing a membrane equation here, it belongs in the backend instead (ADR-0009).
+writing a membrane equation here, it belongs in the backend instead (ADR-0007).
 
 What the runner does own
 ------------------------
