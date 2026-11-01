@@ -40,6 +40,7 @@ What we rejected, and the specific reason.
 | [0003](0003-simulation-backend.md) | Simulation backend stack and the `Backend` boundary | accepted |
 | [0004](0004-provenance-and-versioning.md) | Record-level provenance and immutable dataset versioning | accepted |
 | [0005](0005-partitioning-and-chunking.md) | Chunked, partitioned connectome layout | accepted |
+| [0006](0006-event-driven-delivery.md) | Event-driven spike delivery over a CSR connectome | accepted |
 
 ## Note on numbering
 

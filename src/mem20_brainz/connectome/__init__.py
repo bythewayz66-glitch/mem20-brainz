@@ -5,6 +5,7 @@ a coordinate list (pre, post, weight, delay) that can be converted to CSR-like
 per-neuron adjacency. No measured connectome is bundled with this repository.
 """
 
+from .csr import CSRConnectome
 from .sparse import SparseConnectome
 
-__all__ = ["SparseConnectome"]
+__all__ = ["CSRConnectome", "SparseConnectome"]
