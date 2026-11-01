@@ -1,0 +1,98 @@
+{
+  "config": {
+    "n_neurons": 2000,
+    "p": 0.01,
+    "steps": 200,
+    "drive": 45.0,
+    "dt": 0.1,
+    "seed": 20261101
+  },
+  "n_synapses": 39803,
+  "results": {
+    "reference": {
+      "elapsed_s": 0.12451767548918724,
+      "spikes": 14000,
+      "synapses_attempted": 7960600,
+      "synapses_visited": 7960600,
+      "synapses_per_s": 63931485.78083821,
+      "neurons_per_s": 3212395.3360720654
+    },
+    "numpy": {
+      "elapsed_s": 0.024398040026426315,
+      "spikes": 14000,
+      "synapses_attempted": 7960600,
+      "synapses_visited": 7960600,
+      "synapses_per_s": 326280307.4090219,
+      "neurons_per_s": 16394759.561290452
+    },
+    "numba": {
+      "elapsed_s": 0.0235079787671566,
+      "spikes": 14000,
+      "synapses_attempted": 7960600,
+      "synapses_visited": 7960600,
+      "synapses_per_s": 338633962.4877444,
+      "neurons_per_s": 17015499.459223896
+    },
+    "event_driven": {
+      "elapsed_s": 0.02907000482082367,
+      "spikes": 14000,
+      "synapses_attempted": 7960600,
+      "synapses_visited": 238818,
+      "synapses_per_s": 8215272.1154324645,
+      "neurons_per_s": 13759887.639009563,
+      "edge_hit_rate": 0.03
+    }
+  },
+  "environment": {
+    "python": "3.11.15",
+    "platform": "Linux-6.8.0-85-generic-x86_64-with-glibc2.36",
+    "machine": "x86_64",
+    "processor": "AMD EPYC 9354 32-Core Processor",
+    "cpu_count": 64,
+    "numpy": "2.4.6",
+    "numba": "0.68.1",
+    "mem20_brainz": "0.0.1"
+  },
+  "crossover": [
+    {
+      "n_neurons": 2000,
+      "n_synapses": 79203,
+      "scan_s": 0.01971811056137085,
+      "event_driven_s": 0.01980965957045555,
+      "speedup": 0.9953785672712296,
+      "edge_hit_rate": 0.03
+    },
+    {
+      "n_neurons": 5000,
+      "n_synapses": 199226,
+      "scan_s": 0.04606407880783081,
+      "event_driven_s": 0.042693477123975754,
+      "speedup": 1.0789488678579005,
+      "edge_hit_rate": 0.03
+    },
+    {
+      "n_neurons": 10000,
+      "n_synapses": 399202,
+      "scan_s": 0.08515376597642899,
+      "event_driven_s": 0.10740920156240463,
+      "speedup": 0.7927976815557533,
+      "edge_hit_rate": 0.03
+    },
+    {
+      "n_neurons": 20000,
+      "n_synapses": 799158,
+      "scan_s": 0.2251444049179554,
+      "event_driven_s": 0.17077506333589554,
+      "speedup": 1.3183681535232192,
+      "edge_hit_rate": 0.03
+    },
+    {
+      "n_neurons": 40000,
+      "n_synapses": 1599188,
+      "scan_s": 0.4271065331995487,
+      "event_driven_s": 0.4095286577939987,
+      "speedup": 1.0429222108661125,
+      "edge_hit_rate": 0.03
+    }
+  ]
+}
