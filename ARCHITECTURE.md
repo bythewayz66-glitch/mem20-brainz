@@ -54,12 +54,13 @@ Owns per-neuron state and dynamics.
 - `Neuron` — the interface: `id`, membrane state `v`, and
   `step(i_inj, dt, t) -> bool` (True if the cell spiked).
 - `LIFNeuron` — leaky integrate-and-fire placeholder with textbook parameters.
-  **Not calibrated against any measurement.**
+  **Not calibrated against any measurement.** Carries an explicit `tier` field
+  (ADR-0002).
 
 **Contract:** `step` must be pure with respect to everything except the neuron's
 own state. It must not read the connectome, the clock, or global state. This is
-what makes vectorisation possible later: a model class becomes a struct-of-arrays
-and `step` becomes a kernel over those arrays.
+what makes vectorisation possible: a model class becomes a struct-of-arrays
+(`LIFState`) and `step` becomes a kernel over those arrays.
 
 **Planned:** `EIFNeuron`, `AdExNeuron`, `MultiCompartmentNeuron`, and a
 `NeuronModel` registry so a config can name a model class per region.
@@ -93,18 +94,32 @@ construction goes through `from_arrays`.
 **Planned:** CSR/CSC views, sharded on-disk format, and a streaming iterator that
 yields only the edges whose presynaptic neuron fired this timestep.
 
-### `simulation/` — **implemented (reference)**
+### `simulation/` — **implemented (reference + NumPy backend)**
 
-Owns time. `SimulationEngine` holds the neuron population, the connectome, the
-clock, and the spike history.
+Owns time. Two engines, and the difference between them is the point:
+
+- `SimulationEngine` — the **reference**. A per-neuron Python loop. Slow,
+  correct, and frozen as ground truth (ADR-0003). It is never optimised.
+- `VectorizedEngine` — the same semantics with the per-neuron loop replaced by a
+  `Backend`. Currently backed by `NumPyBackend`, which is **bit-identical** to
+  the reference and verified as such in CI.
 
 **Contract:** fixed `dt`; spikes emitted at step *k* are delivered at step
 *k + ceil(delay/dt)*; `spike_history[k]` is the list of neuron ids that spiked at
 step *k*. The engine validates that the connectome's `n_neurons` matches the
 population size and raises otherwise.
 
-**Planned:** a `Backend` protocol (`step(state, spikes) -> spikes`) with
-NumPy, Numba, JAX and MPI implementations behind it, plus a partitioner.
+**`Backend` contract** (ADR-0003): `step(state, i_inj, dt, t) -> bool mask`. It
+is pure with respect to everything except `state`, it mutates only arrays inside
+`state`, and it must not reassociate the update expression — operation order is
+part of the contract. A backend that does not implement a tier must raise, never
+substitute (ADR-0002). State is `float64`; `float32` changes spike output and is
+refused.
+
+**Planned:** Numba and JAX backends, a CSR view with event-driven delivery, and a
+partitioner. Note that CSR event-driven delivery is *not* bit-identical to the
+reference (different float addition order), so it will be gated on a
+tolerance-based test with a stated bound rather than a bit-identity claim.
 
 ### `io/` — **implemented (minimal)**
 
@@ -139,20 +154,29 @@ spike_history[k-1]  ──►  gather edges whose pre ∈ spikes
 
 This is the shape the fast backends must preserve. The optimisation is to
 replace the per-neuron loop with an array kernel and the edge gather with a
-precomputed CSR slice — not to change the semantics.
+precomputed CSR slice — not to change the semantics. The array-kernel half of
+that is done (`VectorizedEngine`); the CSR half is not.
 
 ## Architecture Decision Records
 
-Decisions are recorded as short ADRs in `docs/adr/NNNN-title.md`, each with
-context, decision, consequences and status. The decisions already made:
+Decisions are recorded as short ADRs in [`docs/adr/`](docs/adr/README.md), each
+with context, decision, consequences and status. The index is
+[`docs/adr/README.md`](docs/adr/README.md).
 
 | ADR | Decision | Status |
 |---|---|---|
-| 0001 | Python as the implementation language, with JIT/GPU escape hatches | accepted |
-| 0002 | Sparse columnar connectome storage; never dense adjacency | accepted |
-| 0003 | Reference implementation before optimisation; freeze interfaces first | accepted |
-| 0004 | Mandatory `measured` flag on every dataset manifest | accepted |
-| 0005 | Fidelity tiers declared per region, not globally | accepted |
+| [0001](docs/adr/0001-sparse-connectome-storage.md) | Sparse connectome storage; never a dense adjacency matrix | accepted |
+| [0002](docs/adr/0002-neuron-model-tiers.md) | Neuron model tiers, declared per neuron | accepted |
+| [0003](docs/adr/0003-simulation-backend.md) | Simulation backend stack and the `Backend` boundary | accepted |
+| [0004](docs/adr/0004-provenance-and-versioning.md) | Record-level provenance and immutable dataset versioning | accepted |
+| [0005](docs/adr/0005-partitioning-and-chunking.md) | Chunked, partitioned connectome layout | accepted |
+
+An earlier draft of this document listed five provisional decisions under
+different titles (implementation language, sparse storage,
+reference-before-optimisation, the `measured` flag, and fidelity tiers). Those
+were placeholders written before any ADR existed; they are now folded into the
+five records above, and `docs/adr/README.md` maps each provisional entry to the
+ADR that superseded it.
 
 ## Open questions
 
@@ -167,3 +191,6 @@ context, decision, consequences and status. The decisions already made:
   objective (e.g. match a measured functional connectivity matrix).
 - **Validation.** What does "correct" mean for a whole-brain model? The project
   needs a validation suite before Phase 3, not after.
+- **Precision.** `float64` state is required for bit-identity with the reference,
+  but doubles memory versus `float32` (602 GB → 1.2 TB at 86 × 10⁹ neurons for
+  the minimal state). A tested precision mode is needed before Phase 4.
