@@ -365,10 +365,19 @@ def test_segmented_reduction_matches_add_at():
         f"float64 round-off: max abs {np.abs(scatter - reduced).max():.3e}"
     )
     # ...and it must not be bit-identical either, or the two are the same code.
-    assert not np.array_equal(scatter, reduced), (
-        "bincount and add.at produced bit-identical sums; the reduction is not "
-        "actually using pairwise summation, so this test is not measuring what "
-        "it claims"
+    #
+    # This is a *negative* assertion, which makes it fragile by construction: it
+    # can only fail by luck, and it failed once during full-suite runs before
+    # passing on every rerun. Rather than delete it (it is the only thing that
+    # would catch the reduction silently collapsing back to the scatter), the
+    # claim is made falsifiable — a *majority* of bins must differ. One or two
+    # bins agreeing bit-for-bit is expected: a bin whose weights happen to sum
+    # in an order where pairwise and sequential agree will match exactly.
+    differing_bins = int(np.count_nonzero(scatter != reduced))
+    assert differing_bins > n // 2, (
+        f"only {differing_bins} of {n} bins differ between bincount and add.at; "
+        "the reduction is not actually using pairwise summation, so this test is "
+        "not measuring what it claims"
     )
 
 
