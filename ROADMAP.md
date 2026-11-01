@@ -5,11 +5,11 @@ condition. Dates are deliberately absent — this is a side project, and a
 schedule that slips is worse than no schedule. What matters is the exit
 criterion.
 
-**Current phase: 0 — Scaffold.**
+**Current phase: 1 — Vectorised core (in progress).**
 
 ---
 
-## Phase 0 — Scaffold *(in progress)*
+## Phase 0 — Scaffold *(complete)*
 
 **Goal:** a repository that is honest, installable, testable, and has frozen
 interfaces.
@@ -23,34 +23,39 @@ interfaces.
 - [x] Smoke test suite
 - [x] JSON Schemas for fixtures, neuron records, dataset manifests
 - [x] Mission README with an explicit implemented/aspirational split
-- [ ] ADR directory populated (`docs/adr/0001`–`0005`)
-- [ ] CI: `pytest` + `ruff` on push
+- [x] ADR directory populated (`docs/adr/0001`–`0005`) with an index
+- [x] CI: `pytest` + `ruff` on push and pull request (Python 3.11 and 3.12)
 
 **Exit criterion:** `pip install -e ".[dev]"` and `pytest` pass on a clean
 checkout, and the interfaces in `ARCHITECTURE.md` are stable enough that Phase 1
-can be built behind them without changing callers.
+can be built behind them without changing callers. **Met.**
 
 ---
 
-## Phase 1 — Vectorised core
+## Phase 1 — Vectorised core *(in progress)*
 
 **Goal:** prove the engine can be fast, without changing semantics.
 
-- [ ] Struct-of-arrays neuron state; remove per-neuron Python objects from the
-      hot path
-- [ ] `Backend` protocol: `step(state, incoming_spikes) -> spikes`
-- [ ] NumPy backend (vectorised state update)
+- [x] Struct-of-arrays neuron state (`LIFState`); per-neuron Python objects
+      removed from the hot path
+- [x] `Backend` protocol: `step(state, i_inj, dt, t) -> spike_mask`
+- [x] NumPy backend (vectorised state update), **bit-identical** to the reference
+- [x] Equivalence tests: bit-identical spikes on a 10⁴-neuron fixed-seed case
 - [ ] Numba backend (JIT inner loop)
 - [ ] JAX backend (JIT + `vmap`; enables autodiff for parameter fitting)
 - [ ] CSR connectome view with precomputed per-neuron incoming slices
 - [ ] Event-driven delivery: only touch edges whose `pre` fired
 - [ ] Benchmark harness with a recorded baseline (synapses/s, neurons/s)
-- [ ] Equivalence tests: every backend produces identical spikes to the
-      reference on the same seed
 
 **Exit criterion:** 10⁶ LIF neurons for 1 second of biological time (10,000
 steps) on a single GPU, with spike output bit-identical to the reference
 implementation on a 10⁴-neuron test case.
+
+**Note on the remaining Phase 1 items:** CSR event-driven delivery is *not*
+bit-identical to the reference, because summing incoming weights in CSR order
+rather than edge order is a different order of float additions. It will be gated
+on a tolerance-based equivalence test with a stated bound, and the ADR that
+introduces it must say so (see ADR-0003).
 
 ---
 

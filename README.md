@@ -5,8 +5,9 @@ scale of individual neurons — one modeled unit per neuron, ~86 billion of them
 connected by ~100 trillion synapses.**
 
 > **Status: pre-alpha scaffold (v0.0.1).** This repository currently contains a
-> project skeleton, data containers, and a small reference simulation loop. It
-> does **not** contain a brain model, real connectome data, or any brain-scale
+> project skeleton, data containers, a reference simulation loop, and a
+> vectorised NumPy backend that is bit-identical to that reference. It does
+> **not** contain a brain model, real connectome data, or any brain-scale
 > capability. Every claim below is labelled as *implemented* or *aspirational*.
 > Please read [Current status](#current-status) before anything else.
 
@@ -107,11 +108,17 @@ produced from a run.
 synaptic delay handling, and spike history recording. It is a correctness
 reference for pinning down interfaces. It runs thousands of neurons.
 
+**Also implemented:** `VectorizedEngine` + `NumPyBackend` — the same semantics
+with the per-neuron Python loop replaced by an elementwise array kernel. It is
+**bit-identical** to the reference, and CI asserts that on a 10⁴-neuron
+fixed-seed case. It is still single-process and O(synapses) per step; it is not
+a brain-scale engine.
+
 **Aspirational:** the production engine. The intended stack, in order of
 adoption:
 
 1. **NumPy vectorised state updates** — batch all neurons of a model class into
-   arrays; remove per-neuron Python objects.
+   arrays; remove per-neuron Python objects. *(done)*
 2. **Numba or JAX kernels** — JIT the inner loop; JAX additionally gives
    autodiff for parameter fitting and `vmap`/`pmap` for batching and multi-device
    execution.
@@ -145,17 +152,26 @@ What is **actually implemented** in this repository today:
 - [x] `connectome` — `SparseConnectome` coordinate-list storage, in/out degree,
       JSON round-trip
 - [x] `simulation` — reference stepping loop with delay handling and spike history
+- [x] `simulation` — `Backend` protocol, `LIFState` struct-of-arrays, and a
+      `NumPyBackend` that is **bit-identical** to the reference loop
+- [x] `simulation` — `VectorizedEngine`: the reference semantics with the
+      per-neuron loop replaced by an array kernel
 - [x] `io` — JSON config/fixture loading, flat-YAML fallback parser
 - [x] `viz` — optional matplotlib spike raster
-- [x] `tests` — smoke tests covering the above
+- [x] `tests` — smoke tests plus bit-identity equivalence tests (including a
+      10⁴-neuron fixed-seed case)
 - [x] `scripts` — fixture validator, build helper, micro-benchmark
 - [x] JSON Schemas for connectome fixtures, neuron records, dataset manifests
+- [x] Five ADRs in [`docs/adr/`](docs/adr/README.md) with an index
+- [x] CI: `pytest` + `ruff` on push and pull request, Python 3.11 and 3.12
 
 What is **not** implemented, and is not claimed:
 
 - [ ] Any measured connectome data, or any reader for it
 - [ ] Any biologically validated neuron or synapse model
-- [ ] Any vectorised, JIT, GPU, or distributed execution
+- [ ] Any JIT, GPU, or distributed execution (the NumPy backend is vectorised but
+      still single-process and O(synapses) per step)
+- [ ] Any CSR / event-driven delivery
 - [ ] Any region atlas or anatomical parcellation
 - [ ] Any plasticity
 - [ ] Any brain-scale run of any kind
@@ -168,8 +184,8 @@ baked in from commit one, this is that place.
 
 | Phase | Goal | Exit criterion |
 |---|---|---|
-| **0 — Scaffold** *(current)* | Package, interfaces, tests, docs, honesty rules | `pip install -e .` and `pytest` pass; interfaces frozen |
-| **1 — Vectorised core** | Replace per-neuron objects with array state; Numba/JAX kernel | 10⁶ LIF neurons, 1 s biological time, on one GPU |
+| **0 — Scaffold** *(complete)* | Package, interfaces, tests, docs, ADRs, CI, honesty rules | `pip install -e .` and `pytest` pass; interfaces frozen |
+| **1 — Vectorised core** *(in progress)* | Array state, `Backend` protocol, NumPy/Numba/JAX kernels | 10⁶ LIF neurons, 1 s biological time, on one GPU |
 | **2 — Real data** | Ingest one measured dataset end to end (mouse mesoscale) | A run whose connectivity traces to a cited, measured source |
 | **3 — Region atlas** | Parcellation + cell-type composition per region | Region-level model with per-region fidelity tiers |
 | **4 — Distributed** | MPI/task-graph partitioning, boundary spike exchange | 10⁹ neurons across multiple nodes |
@@ -216,6 +232,20 @@ spikes = engine.run(steps=100, external_current=np.full(4, 50.0))
 print(f"{spikes} spikes in {engine.t:.1f} ms of simulated time")
 ```
 
+The vectorised path — same semantics, bit-identical output:
+
+```python
+import numpy as np
+from mem20_brainz.connectome import SparseConnectome
+from mem20_brainz.simulation import LIFState, VectorizedEngine
+
+conn = SparseConnectome.from_arrays(n_neurons=4, pre=[0, 1], post=[2, 3])
+engine = VectorizedEngine(state=LIFState.uniform(4), connectome=conn, dt=0.1)
+
+spikes = engine.run(steps=100, external_current=np.full(4, 50.0))
+print(f"{spikes} spikes in {engine.t:.1f} ms of simulated time")
+```
+
 ## Repository layout
 
 ```
@@ -234,17 +264,19 @@ mem20-brainz/
 │   ├── architecture.md
 │   ├── roadmap.md
 │   ├── data-model.md
-│   └── glossary.md
+│   ├── glossary.md
+│   └── adr/               # architecture decision records 0001-0005
+├── .github/workflows/     # CI: pytest + ruff on 3.11 and 3.12
 ├── scripts/               # ingestion, build, benchmark helpers
 ├── src/mem20_brainz/
 │   ├── neurons/           # neuron models
 │   ├── synapses/          # synapse models
 │   ├── regions/           # region containers
 │   ├── connectome/        # sparse connectivity storage
-│   ├── simulation/        # stepping engine
+│   ├── simulation/        # reference engine + Backend protocol + NumPy backend
 │   ├── io/                # config and fixture I/O
 │   └── viz/               # plotting (optional)
-└── tests/                 # smoke and unit tests
+└── tests/                 # smoke and bit-identity equivalence tests
 ```
 
 ## How to contribute
