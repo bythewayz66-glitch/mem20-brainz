@@ -11,7 +11,7 @@ The generator, its parameters and its seed are recorded in
 
 Why this exists
 ---------------
-The observability layer (ADR-0009) needs a network that is small enough to
+The observability layer (ADR-0007) needs a network that is small enough to
 stream at interactive rates, structured enough that "per-region activity" means
 something, and honest about being made up. This is that network. It is a
 *fixture*, not a model of a brain region.
