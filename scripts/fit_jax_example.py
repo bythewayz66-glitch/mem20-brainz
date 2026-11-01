@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
 """Fit a synaptic drive to a target spike rate, using jax.grad.
 
-**STATUS: BROKEN — do not use this as evidence that fitting works.**
-
-This script does not currently converge. Measured on 2026-11-01: it drives the
-fitted current to a large negative value and the population to 0 Hz, leaving a
-rate error of -40 Hz against a 40 Hz target. An earlier variant diverged the
-other way, to 500 Hz. Neither is a working fit.
-
-The cause is the surrogate gradient described below: the derivative is taken
-through a smooth proxy rather than through the spike train, so the search
-direction is not the gradient of the objective. For a 1-D monotone problem that
-*should* still work, which means there is an additional bug in the update rule
-or the loss scaling that has not been found yet.
-
-It is kept in the tree because the reasoning about surrogate gradients is worth
-preserving, and because deleting a broken thing quietly is worse than labelling
-it. It is not imported by the package and not run in CI.
-
 This is the reason the JAX backend exists. The other backends can run a
 simulation; only this one can differentiate through it.
 
@@ -35,17 +18,27 @@ undefined at the threshold. ``jax.grad`` through the spike comparison therefore
 returns the derivative of whatever smooth function XLA differentiates through
 the comparison — **not** the derivative of the model.
 
-So this script does not differentiate the spike train. It optimises a **smooth
-proxy**: the mean membrane potential, which is continuous in ``i_inj``. The
-proxy is chosen because it is monotone in the drive, so driving it to a target
-drives the spike rate in the same direction. The spike rate is then *measured*
-at each step and reported — as an outcome, never as a differentiated quantity.
+This script uses a **straight-through estimator (STE)**, the standard fix:
 
-That distinction matters: a surrogate-gradient result is a heuristic search, not
-an exact gradient descent. It converges here because the problem is 1-D and
-monotone. It would not be trustworthy for a high-dimensional fit without a
-proper surrogate-gradient method (e.g. SuperSpike), which this project does not
-yet implement.
+    forward  value = hard spike (0 or 1)          <- the real simulation
+    backward value = sigmoid((v - v_th) / kappa)  <- a smooth stand-in
+
+implemented as ``soft + stop_gradient(hard - soft)``. The forward pass is the
+true spike count, so the reported rate is a real measurement. Only the
+*derivative* is substituted. That is a heuristic, not an exact gradient: it
+converges here because the problem is 1-D and monotone, and it would not be
+trustworthy for a high-dimensional fit without further work.
+
+Two failed attempts are recorded in ADR-0008, because they are the reason the
+STE is necessary rather than optional:
+
+1. **Mean membrane potential as the proxy.** Not monotone in the drive: once
+   neurons spike they reset to ``v_reset``, so pushing harder can *lower* the
+   mean ``v``. The fit diverged — loss rose 3.6 -> 107 while the rate climbed
+   57 Hz -> 387 Hz.
+2. **STE with the operands swapped** (``hard + stop_gradient(soft - hard)``).
+   This is the classic sign error: it makes the forward pass hard and the
+   backward pass *zero*, so the gradient vanished and the fit never moved.
 
 Run::
 
@@ -69,9 +62,13 @@ N_NEURONS = 200
 STEPS = 200
 DT = 0.1  # ms
 TARGET_RATE_HZ = 40.0
-LEARNING_RATE = 0.5
-ITERATIONS = 60
+LEARNING_RATE = 1e-6
+ITERATIONS = 300
 SEED = 20261101
+
+#: Width of the surrogate sigmoid, in mV. The gradient at the target drive is
+#: ~5.4e3 for kappa=2.0, which is why the learning rate is 1e-6 and not 1e-4.
+KAPPA = 2.0
 
 
 def _require_jax():
@@ -80,7 +77,8 @@ def _require_jax():
         import jax.numpy as jnp
     except ImportError:
         print(
-            "This example needs the optional jax extra:\n    pip install 'mem20-brainz[jax]'",
+            "This example needs the optional jax extra:\n"
+            "    pip install 'mem20-brainz[jax]'",
             file=sys.stderr,
         )
         raise SystemExit(2) from None
@@ -98,23 +96,11 @@ def build_state(n: int, seed: int) -> LIFState:
     return state
 
 
-def make_simulate(jax, jnp, state: LIFState, steps: int, dt: float, kappa: float = 2.0):
-    """Trace the LIF loop, returning (surrogate_rate, spike_count).
+def make_simulate(jax, jnp, state: LIFState, steps: int, dt: float, kappa: float):
+    """Trace the LIF loop, returning (ste_spike_count, hard_spike_count).
 
-    The surrogate is a **sigmoid pseudo-spike** ``sigmoid((v - v_th) / kappa)``
-    accumulated over neurons and steps. It is the standard trick (SuperSpike and
-    relatives): a smooth, monotone stand-in for the step function at threshold,
-    with ``kappa`` setting how sharply it approximates the step.
-
-    Why not the mean membrane potential? Because it is **not monotone** in the
-    drive: once neurons start spiking they reset to ``v_reset``, so pushing
-    harder can *lower* the mean ``v``. An earlier version of this script used
-    mean ``v`` as the proxy and the fit diverged — loss rose from 3.6 to 107
-    while the rate climbed from 57 Hz to 387 Hz. That failure is recorded in
-    ADR-0008 because it is the concrete reason a naive proxy is not enough.
-
-    The spike count is returned from the same trace, so it is a genuine
-    measurement of the simulation the gradient was taken through.
+    ``ste_spike_count`` carries the surrogate gradient; ``hard_spike_count`` is
+    the true spike count and is what gets reported as a rate.
     """
     arrays0 = tuple(
         jnp.asarray(a)
@@ -148,15 +134,19 @@ def make_simulate(jax, jnp, state: LIFState, steps: int, dt: float, kappa: float
                 refractory_ms,
                 jnp.where(spiked, t + refractory_ms, refractory_until),
             )
-            # Smooth pseudo-spike, evaluated on the pre-reset potential.
-            pseudo = jax.nn.sigmoid((v_after - v_threshold) / kappa)
-            return new_arrays, (jnp.sum(pseudo), jnp.sum(spiked.astype(jnp.float64)))
+
+            hard = spiked.astype(jnp.float64)
+            soft = jnp.where(active, jax.nn.sigmoid((v_after - v_threshold) / kappa), 0.0)
+            # Straight-through: forward = hard, backward = soft.
+            ste = soft + jax.lax.stop_gradient(hard - soft)
+
+            return new_arrays, (jnp.sum(ste), jnp.sum(hard))
 
         # lax.scan, not a Python loop: unrolling 200 steps builds a graph large
         # enough to exhaust memory, and scan is the idiomatic JAX form anyway.
         times = jnp.arange(steps, dtype=jnp.float64) * dt
-        _, (pseudo_sums, spike_counts) = jax.lax.scan(body, arrays0, times)
-        return jnp.sum(pseudo_sums), jnp.sum(spike_counts)
+        _, (ste_counts, hard_counts) = jax.lax.scan(body, arrays0, times)
+        return jnp.sum(ste_counts), jnp.sum(hard_counts)
 
     return jax.jit(simulate)
 
@@ -174,50 +164,30 @@ def main(argv: list[str] | None = None) -> int:
 
     jax, jnp = _require_jax()
     state = build_state(N_NEURONS, SEED)
-    simulate = make_simulate(jax, jnp, state, STEPS, DT)
+    simulate = make_simulate(jax, jnp, state, STEPS, DT, KAPPA)
 
-    # --- calibrate the surrogate target ---------------------------------
-    # The surrogate is a pseudo-spike count, but the *goal* is a real spike
-    # rate. So first find the drive that produces the target rate, by bisection,
-    # and read off the surrogate value there. That surrogate value becomes the
-    # target the gradient descends toward.
-    def rate_at(i_inj: float) -> float:
-        _, spikes = simulate(jnp.asarray(float(i_inj)))
-        return rate_hz(float(spikes), N_NEURONS, STEPS, DT)
+    target_spikes = TARGET_RATE_HZ * N_NEURONS * (STEPS * DT / 1000.0)
 
-    lo, hi = 0.0, 200.0
-    for _ in range(40):
-        mid = 0.5 * (lo + hi)
-        if rate_at(mid) < TARGET_RATE_HZ:
-            lo = mid
-        else:
-            hi = mid
-    calibrated_drive = 0.5 * (lo + hi)
-    target_surrogate = float(simulate(jnp.asarray(calibrated_drive))[0])
+    def loss(i_inj):
+        ste, _ = simulate(i_inj)
+        return (ste - target_spikes) ** 2
 
-    # --- gradient fit on the surrogate ----------------------------------
-    def surrogate_loss(i_inj):
-        surrogate, _ = simulate(i_inj)
-        return (surrogate - target_surrogate) ** 2
+    grad_fn = jax.jit(jax.grad(loss))
 
-    grad_fn = jax.jit(jax.grad(surrogate_loss))
-
-    # Start deliberately far from the answer so the fit has work to do.
-    i_inj = jnp.asarray(5.0)
+    # Start below the answer so the fit has to climb.
+    i_inj = jnp.asarray(2.0)
     history = []
     for step in range(ITERATIONS):
-        loss = float(surrogate_loss(i_inj))
-        _, spikes = simulate(i_inj)
+        ste, hard = simulate(i_inj)
         history.append(
             {
                 "iteration": step,
                 "i_inj": float(i_inj),
-                "loss": loss,
-                "rate_hz": rate_hz(float(spikes), N_NEURONS, STEPS, DT),
+                "loss": float((ste - target_spikes) ** 2),
+                "rate_hz": rate_hz(float(hard), N_NEURONS, STEPS, DT),
             }
         )
-        g = grad_fn(i_inj)
-        i_inj = i_inj - LEARNING_RATE * g
+        i_inj = i_inj - LEARNING_RATE * grad_fn(i_inj)
 
     final = history[-1]
     result = {
@@ -228,9 +198,9 @@ def main(argv: list[str] | None = None) -> int:
             "target_rate_hz": TARGET_RATE_HZ,
             "learning_rate": LEARNING_RATE,
             "iterations": ITERATIONS,
+            "kappa_mv": KAPPA,
             "seed": SEED,
         },
-        "calibrated_drive_na": calibrated_drive,
         "fitted_drive_na": final["i_inj"],
         "initial_loss": history[0]["loss"],
         "final_loss": final["loss"],
@@ -246,12 +216,13 @@ def main(argv: list[str] | None = None) -> int:
 
     print("Fitting a constant injected current to a target spike rate")
     print(f"  population      : {N_NEURONS} heterogeneous LIF neurons")
-    print(f"  duration        : {STEPS} steps x {DT} ms = {STEPS * DT / 1000:.1f} s")
-    print(f"  target rate     : {TARGET_RATE_HZ:.1f} Hz")
-    print(f"  calibrated drive: {calibrated_drive:.4f} nA (bisection, for the surrogate target)")
+    print(f"  duration        : {STEPS} steps x {DT} ms = {STEPS * DT / 1000:.2f} s")
+    print(f"  target rate     : {TARGET_RATE_HZ:.1f} Hz ({target_spikes:.0f} spikes)")
+    print(f"  surrogate kappa : {KAPPA} mV (straight-through estimator)")
     print()
     print(f"  {'iter':>4}  {'i_inj (nA)':>11}  {'loss':>12}  {'rate (Hz)':>10}")
-    for row in [*history[:: max(1, ITERATIONS // 10)], history[-1]]:
+    stride = max(1, ITERATIONS // 10)
+    for row in history[::stride] + [history[-1]]:
         print(
             f"  {row['iteration']:>4}  {row['i_inj']:>11.4f}  "
             f"{row['loss']:>12.3e}  {row['rate_hz']:>10.2f}"
@@ -262,10 +233,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  rate            : {history[0]['rate_hz']:.2f} -> {final['rate_hz']:.2f} Hz")
     print(f"  rate error      : {final['rate_hz'] - TARGET_RATE_HZ:+.2f} Hz")
     print()
-    print("  NOTE: the gradient is a surrogate. It is taken through the mean")
-    print("  membrane potential (a smooth proxy), not through the spike train,")
-    print("  which is discontinuous at threshold. The spike rate above is a")
-    print("  measured outcome of the fitted drive, not a differentiated quantity.")
+    print("  NOTE: the gradient is a surrogate (straight-through estimator). The")
+    print("  forward pass is the true spike count, so the rate above is a real")
+    print("  measurement; only the derivative is substituted. This is a heuristic")
+    print("  search, not exact gradient descent.")
     return 0
 
 
