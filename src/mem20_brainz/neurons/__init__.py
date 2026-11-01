@@ -7,4 +7,4 @@ ranging from point neurons to multi-compartment morphologically detailed cells.
 
 from .base import LIFNeuron, Neuron
 
-__all__ = ["Neuron", "LIFNeuron"]
+__all__ = ["LIFNeuron", "Neuron"]

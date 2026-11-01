@@ -34,7 +34,7 @@ class SparseConnectome:
 
     @property
     def n_synapses(self) -> int:
-        return int(len(self.pre))
+        return len(self.pre)
 
     def add(self, pre: int, post: int, weight: float = 1.0, delay_ms: float = 1.0) -> None:
         """Append one synapse. O(n) per call — use :meth:`from_arrays` in bulk."""
@@ -51,7 +51,7 @@ class SparseConnectome:
         post: np.ndarray,
         weight: np.ndarray | None = None,
         delay_ms: np.ndarray | None = None,
-    ) -> "SparseConnectome":
+    ) -> SparseConnectome:
         pre = np.asarray(pre, dtype=np.int32)
         post = np.asarray(post, dtype=np.int32)
         n = len(pre)
@@ -80,7 +80,7 @@ class SparseConnectome:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "SparseConnectome":
+    def from_dict(cls, data: dict) -> SparseConnectome:
         return cls.from_arrays(
             n_neurons=int(data["n_neurons"]),
             pre=data["pre"],

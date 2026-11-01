@@ -1,10 +1,23 @@
 """Simulation engine.
 
-A single-process, single-threaded reference stepping loop. It exists to pin down
-interfaces (state layout, spike delivery, timestep semantics) before any
-performance work. It cannot run brain-scale workloads.
+Two engines live here, and the difference between them is the whole point:
+
+* :class:`SimulationEngine` — the reference. A per-neuron Python loop. Slow,
+  correct, and frozen as ground truth (ADR-0003). It is never optimised.
+* :class:`VectorizedEngine` — the same semantics with the per-neuron loop
+  replaced by a :class:`Backend`. Currently backed by :class:`NumPyBackend`,
+  which is bit-identical to the reference.
+
+Neither is brain-scale. Both are single-process and O(synapses) per step.
 """
 
+from .backend import Backend, LIFState, NumPyBackend, VectorizedEngine
 from .engine import SimulationEngine
 
-__all__ = ["SimulationEngine"]
+__all__ = [
+    "Backend",
+    "LIFState",
+    "NumPyBackend",
+    "SimulationEngine",
+    "VectorizedEngine",
+]

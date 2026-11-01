@@ -45,6 +45,8 @@ class LIFNeuron(Neuron):
     r_m: float = 10.0
     refractory_ms: float = 2.0
     v: float = -70.0
+    #: Model tier, declared per neuron and never defaulted implicitly (ADR-0002).
+    tier: str = "tier0_point_lif"
     _refractory_until: float = field(default=0.0, repr=False)
 
     def step(self, i_inj: float, dt: float, t: float) -> bool:

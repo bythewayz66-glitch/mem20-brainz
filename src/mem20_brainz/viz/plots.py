@@ -12,7 +12,9 @@ def plot_raster(spike_history: list[list[int]], dt: float = 0.1, path: str | Non
     try:
         import matplotlib.pyplot as plt  # type: ignore
     except ImportError as exc:  # pragma: no cover - optional dependency
-        raise ImportError("plot_raster requires matplotlib: pip install 'mem20-brainz[viz]'") from exc
+        raise ImportError(
+            "plot_raster requires matplotlib: pip install 'mem20-brainz[viz]'"
+        ) from exc
 
     xs, ys = [], []
     for step, spikes in enumerate(spike_history):
