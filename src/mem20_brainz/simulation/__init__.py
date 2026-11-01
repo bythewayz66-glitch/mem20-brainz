@@ -26,9 +26,13 @@ __all__ = [
 
 
 def __getattr__(name: str):
-    """Expose NumbaBackend lazily so numba stays an optional dependency."""
+    """Expose optional backends lazily so their deps stay optional."""
     if name == "NumbaBackend":
         from .numba_backend import NumbaBackend
 
         return NumbaBackend
+    if name == "JAXBackend":
+        from .jax_backend import JAXBackend
+
+        return JAXBackend
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
