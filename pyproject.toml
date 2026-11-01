@@ -23,6 +23,9 @@ dependencies = ["numpy>=1.24"]
 [project.optional-dependencies]
 dev = ["pytest>=7.4", "ruff>=0.4,<0.18"]
 viz = ["matplotlib>=3.7"]
+# Optional JIT backend. Deliberately NOT a base dependency: the package must
+# install and run with numpy alone.
+numba = ["numba>=0.59"]
 
 [project.urls]
 Homepage = "https://github.com/bythewayz66-glitch/mem20-brainz"

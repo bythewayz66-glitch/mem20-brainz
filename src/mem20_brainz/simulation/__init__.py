@@ -13,11 +13,22 @@ Neither is brain-scale. Both are single-process and O(synapses) per step.
 
 from .backend import Backend, LIFState, NumPyBackend, VectorizedEngine
 from .engine import SimulationEngine
+from .event_driven import EventDrivenEngine
 
 __all__ = [
     "Backend",
+    "EventDrivenEngine",
     "LIFState",
     "NumPyBackend",
     "SimulationEngine",
     "VectorizedEngine",
 ]
+
+
+def __getattr__(name: str):
+    """Expose NumbaBackend lazily so numba stays an optional dependency."""
+    if name == "NumbaBackend":
+        from .numba_backend import NumbaBackend
+
+        return NumbaBackend
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
