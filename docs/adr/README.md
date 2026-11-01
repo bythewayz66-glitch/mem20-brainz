@@ -41,6 +41,8 @@ What we rejected, and the specific reason.
 | [0004](0004-provenance-and-versioning.md) | Record-level provenance and immutable dataset versioning | accepted |
 | [0005](0005-partitioning-and-chunking.md) | Chunked, partitioned connectome layout | accepted |
 | [0006](0006-event-driven-delivery.md) | Event-driven spike delivery over a CSR connectome | accepted |
+| [0007](0007-numeric-precision.md) | Numeric precision: float64 default, float32 opt-in | accepted |
+| [0008](0008-live-observability-layer.md) | Live observability layer: streaming server, frontend, affective readout proxies | accepted |
 
 ## Note on numbering
 
