@@ -90,7 +90,7 @@ one is "at what size does it start to win?"
 
 **The honest answer from the committed data: the crossover is now real, and it
 came from replacing the scatter.** Measured speedup across 2k → 40k neurons is
-**2.11×, 4.01×, 2.93×, 3.50×, 2.10×** — event-driven wins at every size tested.
+**2.05×, 1.30×, 1.42×, 2.69×, 2.30×** — event-driven wins at every size tested.
 
 That is a change from the previous baseline, which measured 1.00×, 1.08×, 0.79×,
 1.32×, 1.04× — bouncing around 1.0 with no trend. The work reduction was always
@@ -102,16 +102,16 @@ converted the work reduction into time. Before/after on the main benchmark:
 
 | path | before (synapses/s) | after (synapses/s) | change |
 |---|---:|---:|---:|
-| `event_driven` | 6,213,128 | 9,758,766 | **+57%** |
-| `event_driven` elapsed | 0.038 s | 0.024 s | **−37%** |
+| `event_driven` | 8,215,272 | 12,095,877 | **+47%** |
+| `event_driven` elapsed | 0.029 s | 0.020 s | **−32%** |
 
-`event_driven` is now the **fastest path on the main benchmark** (0.024 s vs
-0.026 s for numba and 0.028 s for numpy), which it was not before.
+`event_driven` is now the **fastest path on the main benchmark** (0.020 s vs
+0.023 s for numba and 0.039 s for numpy), which it was not before.
 
 Two caveats worth keeping:
 
-- The speedup is not monotone in population size (4.01× at 5k, 2.93× at 10k,
-  3.50× at 20k). These are single-run timings and the variation is within
+- The speedup is not monotone in population size (1.30× at 5k, 1.42× at 10k,
+  2.69× at 20k). These are single-run timings and the variation is within
   scheduler noise. The *direction* is stable; the exact ratio is not.
 - `bincount` uses pairwise summation while `add.at` accumulates sequentially, so
   the two are not bit-identical — measured max absolute difference 5.415e-07 on
