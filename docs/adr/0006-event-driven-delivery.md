@@ -107,15 +107,14 @@ case really is the reordering, not a bug in the index construction.
   (ADR-0003) does not extend to this path. Two engines now have different
   equivalence standards, and that must be documented wherever results are
   compared.
-- **Wall-clock gain is modest at current scale, and can be negative.** Measured
-  on the benchmark machine, event-driven delivery is *slower* than the NumPy
-  scan at 2,000 neurons (0.25×) and only modestly faster at 20,000 (1.02–1.48×
-  depending on drive). The reason is that `np.add.at` — an unbuffered scatter —
-  dominates the per-step cost, and the CSR gather adds fixed overhead that a
-  small connectome cannot amortise. **The optimisation reduces work but does not
-  yet reduce time.** That is an honest and important distinction: the win is
-  asymptotic, and it will only become a wall-clock win once the scatter is
-  replaced (see below).
+- **Wall-clock gain was modest at first, and is now real.** The original
+  measurement found event-driven delivery *slower* than the NumPy scan at 2,000
+  neurons (0.25×) and only modestly faster at 20,000 (1.02–1.48×), because
+  `np.add.at` — an unbuffered scatter — dominated the per-step cost. **That has
+  since been fixed** by replacing the scatter with a segmented reduction
+  (`np.bincount(weights=...)`); see "Resolution" below. The lesson stands: the
+  optimisation reduced work long before it reduced time, and the two had to be
+  measured separately.
 - `indices` is `int32`, which caps the population at 2,147,483,647 neurons.
   86 × 10⁹ exceeds that by a factor of 40, so this view is **not** usable at
   human scale as written. Widening to `int64` costs 400 TB at 10¹⁴ synapses.
@@ -147,7 +146,33 @@ order is dictated by the source dataset, not by the simulator.
 asserting equality would either fail intermittently or, worse, pass by luck on
 the tested seeds and fail in production.
 
+## Resolution: the segmented reduction (2026-11-01)
+
+The bottleneck identified above was `np.add.at`. It has been replaced with
+`np.bincount(posts, weights=weights, minlength=n_neurons)`.
+
+**Why `bincount` and not `np.add.reduceat`.** `reduceat` requires the array to be
+sorted by the segment key plus a segment-boundary index, so it would cost an
+`argsort` per timestep. `bincount` indexes directly by the post id and needs
+neither. The trade is that `bincount` always allocates a full `n_neurons` output
+— which is free here, because `current` is that size anyway.
+
+**Measured result.** Crossover speedup across 2k → 40k neurons went from
+1.00×, 1.08×, 0.79×, 1.32×, 1.04× to **2.11×, 4.01×, 2.93×, 3.50×, 2.10×**.
+On the main benchmark, `event_driven` went from 6,213,128 to 9,758,766
+synapses/s (+57%) and from 0.038 s to 0.024 s (−37%), making it the fastest path
+on that benchmark.
+
+**Numerical consequence, measured.** `bincount` uses pairwise summation while
+`add.at` accumulates sequentially, so the two are **not** bit-identical: max
+absolute difference 5.415e-07 on sums of order 70 (~7e-9 relative). This is
+float64 round-off and `bincount` is the more accurate of the two, but it means
+the tolerance gate below is still required — the change did not buy back
+bit-identity, and does not claim to.
+
 ## What would make this a wall-clock win
+
+*(Resolved — see "Resolution" above. Kept for the record.)*
 
 The measured bottleneck is `np.add.at`, not the edge gather. The next step is to
 replace the unbuffered scatter with a segmented reduction — sort the gathered

@@ -127,10 +127,30 @@ benchmark configuration. It is **not** bit-identical (different float addition
 order; measured drift 5.4 × 10⁻⁹, no spike flips observed) and is gated on a
 tolerance test — see [ADR-0006](docs/adr/0006-event-driven-delivery.md).
 
-**Honest caveat on that optimisation:** it reduces *work*, not yet *time*.
-`np.add.at` dominates the per-step cost, so event-driven delivery is slower than
-the NumPy scan at 2,000 neurons and only modestly faster at 20,000. The win is
-asymptotic. Numbers: [`docs/benchmarks/`](docs/benchmarks/README.md).
+**The optimisation now wins on wall time too.** Delivery originally used
+`np.add.at`, an unbuffered scatter that dominated the per-step cost, so the work
+reduction did not translate into time. Replacing it with a segmented reduction
+(`np.bincount`) changed that: crossover speedup went from 1.00×/1.08×/0.79×/
+1.32×/1.04× to **2.11×/4.01×/2.93×/3.50×/2.10×** across 2k→40k neurons, and
+`event_driven` is now the fastest path on the main benchmark (9.76M synapses/s,
+up from 6.21M). Numbers: [`docs/benchmarks/`](docs/benchmarks/README.md).
+
+**Also implemented:** `JAXBackend` — the same kernel compiled by XLA. It is
+**not** bit-identical and does not claim to be: XLA fuses and reassociates, and
+the membrane potential diverges at step 0 (max abs 1.4 × 10⁻¹⁴), staying bounded
+at 5.9 × 10⁻¹⁶ relative over 2000 steps. The gate is a tolerance test. It exists
+for one reason the others cannot offer — `jax.grad` through a simulation — and
+`scripts/fit_jax_example.py` demonstrates it by fitting a drive to a 40 Hz
+target (2.0 → 3.4746 nA, loss 2.56e+04 → 0, rate 0.00 → 40.00 Hz). The gradient
+is a **surrogate** (straight-through estimator): the forward pass is the true
+spike count, only the derivative is substituted, because a spike is
+discontinuous at threshold. See [ADR-0008](docs/adr/0008-jax-backend.md).
+
+**Precision:** state is `float64` by default, and that is the only
+reference-equivalent precision. `float32` is an explicit opt-in that halves
+state memory (2.8 TB vs 5.5 TB at 86 × 10⁹ neurons) but drifts spike count by
+~0.14% and agrees on only ~14% of timesteps for a heterogeneous population — so
+the saving is **not** banked. See [ADR-0007](docs/adr/0007-numeric-precision.md).
 
 **Aspirational:** the production engine. The intended stack, in order of
 adoption:
@@ -139,7 +159,7 @@ adoption:
    arrays; remove per-neuron Python objects. *(done)*
 2. **Numba or JAX kernels** — JIT the inner loop; JAX additionally gives
    autodiff for parameter fitting and `vmap`/`pmap` for batching and multi-device
-   execution. *(Numba done; JAX pending)*
+   execution. *(both done; JAX tolerance-gated)*
 3. **Sparse event-driven delivery** — spikes are sparse; deliver them as index
    lists into a precomputed CSR structure rather than scanning all edges.
    *(done, tolerance-gated)*
@@ -177,10 +197,18 @@ What is **actually implemented** in this repository today:
       per-neuron loop replaced by an array kernel
 - [x] `simulation` — `NumbaBackend`: JIT kernel, **bit-identical** to the
       reference, optional dependency
+- [x] `simulation` — `JAXBackend`: XLA-compiled, tolerance-gated (ADR-0008),
+      optional dependency, with `jax_enable_x64` enforced
+- [x] `scripts/fit_jax_example.py` — gradient-based parameter fitting via a
+      straight-through estimator (surrogate gradient, ADR-0008)
+- [x] `simulation` — `precision` mode: `float64` default, `float32` opt-in,
+      with the measured divergence pinned by tests (ADR-0007)
 - [x] `connectome` — `CSRConnectome`: row-compressed view indexed by
       presynaptic neuron
 - [x] `simulation` — `EventDrivenEngine`: CSR delivery, tolerance-gated
       (ADR-0006)
+- [x] `simulation` — segmented reduction (`np.bincount`) replacing the
+      `np.add.at` scatter: 2.1×–4.0× crossover speedup (ADR-0006)
 - [x] `scripts/benchmark.py` — harness with a committed JSON baseline and a
       `--check` mode that fails when the baseline goes stale
 - [x] `io` — JSON config/fixture loading, flat-YAML fallback parser
@@ -202,9 +230,9 @@ What is **actually implemented** in this repository today:
       10⁴-neuron fixed-seed case), readout unit tests, and server/WebSocket tests
 - [x] `scripts` — fixture validator, build helper, micro-benchmark, `dev.sh`
 - [x] JSON Schemas for connectome fixtures, neuron records, dataset manifests
-- [x] Eight ADRs in [`docs/adr/`](docs/adr/README.md) with an index
+- [x] Ten ADRs in [`docs/adr/`](docs/adr/README.md) with an index
 - [x] CI: `pytest` + `ruff` on push and pull request, Python 3.11 and 3.12,
-      plus numba, server, frontend-build and benchmark-baseline jobs
+      plus numba, jax, server, frontend-build and benchmark-baseline jobs
 
 What is **not** implemented, and is not claimed:
 
@@ -212,9 +240,8 @@ What is **not** implemented, and is not claimed:
 - [ ] Any biologically validated neuron or synapse model
 - [ ] Any GPU or distributed execution (all engines are single-process; the
       scan-based paths are still O(synapses) per step)
-- [ ] Any JAX backend, or autodiff for parameter fitting
-- [ ] Any wall-clock win from event-driven delivery (it cuts work, not time —
-      `np.add.at` is the bottleneck)
+- [ ] Any exact gradient through spiking dynamics (the JAX fit uses a surrogate)
+- [ ] Any recurrent delivery inside the traced JAX loop (it is feedforward only)
 - [ ] Any region atlas or anatomical parcellation
 - [ ] Any plasticity
 - [ ] Any brain-scale run of any kind

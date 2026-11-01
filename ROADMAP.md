@@ -42,10 +42,17 @@ can be built behind them without changing callers. **Met.**
 - [x] NumPy backend (vectorised state update), **bit-identical** to the reference
 - [x] Equivalence tests: bit-identical spikes on a 10⁴-neuron fixed-seed case
 - [x] Numba backend (JIT inner loop), **bit-identical** to the reference
-- [ ] JAX backend (JIT + `vmap`; enables autodiff for parameter fitting)
+- [x] JAX backend (JIT; enables autodiff for parameter fitting) —
+      tolerance-gated, not bit-identical (ADR-0008)
+- [x] Gradient-based parameter fitting via a straight-through estimator
+      (`scripts/fit_jax_example.py`; surrogate gradient, ADR-0008)
 - [x] CSR connectome view indexed by presynaptic neuron
 - [x] Event-driven delivery: only touch edges whose `pre` fired
       (tolerance-gated, not bit-identical — ADR-0006)
+- [x] Segmented reduction (`np.bincount`) replacing the `np.add.at` scatter —
+      turns the work reduction into a wall-clock win (2.1×–4.0×, ADR-0006)
+- [x] Numeric precision decision: float64 default, float32 as a tested opt-in
+      (ADR-0007)
 - [x] Benchmark harness with a recorded baseline (synapses/s, neurons/s)
 - [x] Live observability layer: streaming server, frame schema, React frontend,
       headless mode (ADR-0009)

@@ -121,11 +121,19 @@ Owns time. Three engines, and the difference between them is the point:
 |---|---|---|---|
 | `NumPyBackend` | numpy (base) | yes | elementwise array kernel |
 | `NumbaBackend` | `numba` (optional extra) | yes | JIT, `fastmath=False`, lazy import |
-| *(JAX)* | — | — | planned; enables autodiff |
+| `JAXBackend` | `jax` (optional extra) | **no** | XLA fuses/reassociates; tolerance-gated (ADR-0008) |
 
-`NumbaBackend` is imported lazily and is **not** a base dependency: `import
-mem20_brainz` must work with numpy alone. A missing numba raises an actionable
-`ImportError` rather than failing at import time.
+`NumbaBackend` and `JAXBackend` are imported lazily and are **not** base
+dependencies: `import mem20_brainz` must work with numpy alone. A missing extra
+raises an actionable `ImportError` rather than failing at import time.
+
+**Precision** (ADR-0007). State is `float64` by default and that is the only
+reference-equivalent precision. `float32` is available as an explicit per-state
+opt-in (`LIFState.uniform(n, precision="float32")` plus a matching backend) and
+halves state memory — 2.8 TB instead of 5.5 TB at 86 × 10⁹ neurons — but it is
+**not** reference-equivalent: measured on a heterogeneous population it drifts
+spike count by ~0.14% and agrees on only ~14% of timesteps. A backend refuses a
+state whose precision does not match its own rather than silently casting.
 
 **Contract:** fixed `dt`; spikes emitted at step *k* are delivered at step
 *k + ceil(delay/dt)*; `spike_history[k]` is the list of neuron ids that spiked at
@@ -136,8 +144,7 @@ population size and raises otherwise.
 is pure with respect to everything except `state`, it mutates only arrays inside
 `state`, and it must not reassociate the update expression — operation order is
 part of the contract. A backend that does not implement a tier must raise, never
-substitute (ADR-0002). State is `float64`; `float32` changes spike output and is
-refused.
+substitute (ADR-0002).
 
 **CSR and event-driven delivery** (ADR-0006). `CSRConnectome` in
 `connectome/csr.py` stores `indptr` (int64), `indices` (int32), `weights` and
@@ -162,7 +169,32 @@ when the edge list is already grouped by `pre`, CSR order equals edge-list order
 the 10⁴–10⁸ range Phases 1–4 run at; widening to `int64` costs 400 TB at 10¹⁴
 synapses and is deferred.
 
-**Planned:** JAX backend and the partitioner.
+**Segmented reduction** (ADR-0006, resolution). Delivery originally used
+`np.add.at`, an unbuffered scatter that dominated the per-step cost. It is now
+`np.bincount(posts, weights=weights, minlength=n_neurons)`, which indexes
+directly by post id and needs no sort — unlike `np.add.reduceat`, which would
+cost an `argsort` per timestep. Measured effect: crossover speedup went from
+1.00×/1.08×/0.79×/1.32×/1.04× to **2.11×/4.01×/2.93×/3.50×/2.10×** across
+2k→40k neurons, and `event_driven` became the fastest path on the main
+benchmark. `bincount` uses pairwise summation, so the two are still not
+bit-identical (measured 5.4 × 10⁻⁷ absolute on sums of order 70, ~7 × 10⁻⁹
+relative) — the tolerance gate remains.
+
+**JAX and autodiff** (ADR-0008). `JAXBackend` exists for one reason: `jax.grad`
+through a simulation, which no other backend offers. It is **not** bit-identical
+— XLA fuses and reassociates, and the membrane potential diverges at step 0
+(max abs 1.4 × 10⁻¹⁴), staying bounded at 5.9 × 10⁻¹⁶ relative over 2000 steps.
+The gate is a tolerance test (1e-9 relative / 1e-12 absolute on `v`, 1% on spike
+count). It requires `jax_enable_x64`, because JAX silently truncates float64 to
+float32 otherwise — which per ADR-0007 changes spike output.
+
+Gradients through a spike are **not** the derivative of the model: the spike is
+discontinuous at threshold. `scripts/fit_jax_example.py` therefore uses a
+straight-through estimator — forward pass is the true spike count, only the
+derivative is substituted with a sigmoid surrogate. It is a heuristic search,
+not exact gradient descent, and is documented as such.
+
+**Planned:** the partitioner, and recurrent delivery inside the traced JAX loop.
 
 ### `io/` — **implemented (minimal)**
 

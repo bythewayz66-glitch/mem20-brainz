@@ -138,6 +138,43 @@ jobs:
       - name: Run numba slow case
         run: pytest -q -m slow tests/test_numba_equivalence.py
 
+  jax:
+    name: jax backend (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install package with the jax extra
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,jax]"
+
+      - name: Verify jax is actually installed
+        # Without this, a broken extra would silently turn the jax tests into
+        # skips and the job would pass while testing nothing.
+        run: python -c "import jax; print('jax', jax.__version__)"
+
+      - name: Run jax equivalence tests
+        # -rs so any skip is printed with its reason, making a silent skip
+        # visible in the log rather than hidden in a summary line.
+        run: pytest -q tests/test_jax_backend.py -rs
+
+      - name: Run the parameter-fitting example
+        # The fit is the point of this backend, so CI proves it converges
+        # rather than only that the module imports.
+        run: python scripts/fit_jax_example.py
+
   benchmark:
     name: benchmark baseline is current
     runs-on: ubuntu-latest

@@ -91,11 +91,30 @@ class EventDrivenEngine:
             return current
 
         self.edges_visited += int(edges.size)
-        np.add.at(
-            current,
-            self.connectome.indices[edges],
-            self.connectome.weights[edges],
-        )
+        posts = self.connectome.indices[edges]
+        weights = self.connectome.weights[edges]
+
+        # Segmented reduction instead of an unbuffered scatter.
+        #
+        # ``np.add.at`` is correct but slow: it is an unbuffered scatter, so it
+        # cannot vectorise and pays a per-element Python-level loop internally.
+        # ``np.bincount`` with weights is a single pass that accumulates into
+        # bins, which is exactly the operation we want (sum weights by
+        # postsynaptic id).
+        #
+        # Why bincount and not ``np.add.reduceat``: reduceat needs the array
+        # *sorted* by the segment key and a segment-boundary index, so it would
+        # cost an argsort per step. bincount needs neither — it indexes directly
+        # by the post id. The trade is that bincount always allocates a full
+        # ``n_neurons`` output, which is fine because ``current`` is that size
+        # anyway.
+        #
+        # This changes the float addition order again (bincount accumulates in
+        # edge order within each bin, which is the same order as add.at, but the
+        # implementation may use pairwise summation internally). It is therefore
+        # still NOT bit-identical to the reference, and the tolerance test in
+        # tests/test_event_driven.py remains the gate.
+        current = np.bincount(posts, weights=weights, minlength=self.n_neurons)
         return current
 
     def step(self, external_current: np.ndarray | None = None) -> list[int]:

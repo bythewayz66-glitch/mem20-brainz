@@ -77,8 +77,7 @@ def _require_jax():
         import jax.numpy as jnp
     except ImportError:
         print(
-            "This example needs the optional jax extra:\n"
-            "    pip install 'mem20-brainz[jax]'",
+            "This example needs the optional jax extra:\n    pip install 'mem20-brainz[jax]'",
             file=sys.stderr,
         )
         raise SystemExit(2) from None
@@ -222,7 +221,7 @@ def main(argv: list[str] | None = None) -> int:
     print()
     print(f"  {'iter':>4}  {'i_inj (nA)':>11}  {'loss':>12}  {'rate (Hz)':>10}")
     stride = max(1, ITERATIONS // 10)
-    for row in history[::stride] + [history[-1]]:
+    for row in [*history[::stride], history[-1]]:
         print(
             f"  {row['iteration']:>4}  {row['i_inj']:>11.4f}  "
             f"{row['loss']:>12.3e}  {row['rate_hz']:>10.2f}"

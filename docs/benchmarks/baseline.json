@@ -10,36 +10,36 @@
   "n_synapses": 39803,
   "results": {
     "reference": {
-      "elapsed_s": 0.12451767548918724,
+      "elapsed_s": 0.19136983528733253,
       "spikes": 14000,
       "synapses_attempted": 7960600,
       "synapses_visited": 7960600,
-      "synapses_per_s": 63931485.78083821,
-      "neurons_per_s": 3212395.3360720654
+      "synapses_per_s": 41597987.4155587,
+      "neurons_per_s": 2090193.574130528
     },
     "numpy": {
-      "elapsed_s": 0.024398040026426315,
+      "elapsed_s": 0.024445723742246628,
       "spikes": 14000,
       "synapses_attempted": 7960600,
       "synapses_visited": 7960600,
-      "synapses_per_s": 326280307.4090219,
-      "neurons_per_s": 16394759.561290452
+      "synapses_per_s": 325643866.5484321,
+      "neurons_per_s": 16362780.019015256
     },
     "numba": {
-      "elapsed_s": 0.0235079787671566,
+      "elapsed_s": 0.031128667294979095,
       "spikes": 14000,
       "synapses_attempted": 7960600,
       "synapses_visited": 7960600,
-      "synapses_per_s": 338633962.4877444,
-      "neurons_per_s": 17015499.459223896
+      "synapses_per_s": 255732117.42617732,
+      "neurons_per_s": 12849891.587376697
     },
     "event_driven": {
-      "elapsed_s": 0.02907000482082367,
+      "elapsed_s": 0.02066599577665329,
       "spikes": 14000,
       "synapses_attempted": 7960600,
       "synapses_visited": 238818,
-      "synapses_per_s": 8215272.1154324645,
-      "neurons_per_s": 13759887.639009563,
+      "synapses_per_s": 11556084.815898228,
+      "neurons_per_s": 19355467.034977645,
       "edge_hit_rate": 0.03
     }
   },
@@ -57,41 +57,41 @@
     {
       "n_neurons": 2000,
       "n_synapses": 79203,
-      "scan_s": 0.01971811056137085,
-      "event_driven_s": 0.01980965957045555,
-      "speedup": 0.9953785672712296,
+      "scan_s": 0.017400916665792465,
+      "event_driven_s": 0.008339039981365204,
+      "speedup": 2.0866810453814035,
       "edge_hit_rate": 0.03
     },
     {
       "n_neurons": 5000,
       "n_synapses": 199226,
-      "scan_s": 0.04606407880783081,
-      "event_driven_s": 0.042693477123975754,
-      "speedup": 1.0789488678579005,
+      "scan_s": 0.042327720671892166,
+      "event_driven_s": 0.01623782142996788,
+      "speedup": 2.6067364304040073,
       "edge_hit_rate": 0.03
     },
     {
       "n_neurons": 10000,
       "n_synapses": 399202,
-      "scan_s": 0.08515376597642899,
-      "event_driven_s": 0.10740920156240463,
-      "speedup": 0.7927976815557533,
+      "scan_s": 0.11260991916060448,
+      "event_driven_s": 0.05553405359387398,
+      "speedup": 2.0277633609124224,
       "edge_hit_rate": 0.03
     },
     {
       "n_neurons": 20000,
       "n_synapses": 799158,
-      "scan_s": 0.2251444049179554,
-      "event_driven_s": 0.17077506333589554,
-      "speedup": 1.3183681535232192,
+      "scan_s": 0.19629990309476852,
+      "event_driven_s": 0.08146815001964569,
+      "speedup": 2.4095294056319143,
       "edge_hit_rate": 0.03
     },
     {
       "n_neurons": 40000,
       "n_synapses": 1599188,
-      "scan_s": 0.4271065331995487,
-      "event_driven_s": 0.4095286577939987,
-      "speedup": 1.0429222108661125,
+      "scan_s": 0.3935798220336437,
+      "event_driven_s": 0.1377040259540081,
+      "speedup": 2.8581576995076077,
       "edge_hit_rate": 0.03
     }
   ]

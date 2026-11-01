@@ -88,21 +88,36 @@ scaled so mean out-degree stays roughly constant.
 This exists because "is event-driven faster?" is the wrong question. The right
 one is "at what size does it start to win?"
 
-**The honest answer from the committed data: there is no clean crossover point
-yet.** The measured speedup across 2k → 40k neurons is 1.00×, 1.08×, 0.79×,
-1.32×, 1.04× — it bounces around 1.0 with no monotonic trend. Event-driven
-delivery reduces *work* by ~97% (3% edge hit rate, consistently) but does not
-reliably reduce *time*, because `np.add.at` — an unbuffered scatter — dominates
-the per-step cost and the CSR gather adds fixed overhead.
+**The honest answer from the committed data: the crossover is now real, and it
+came from replacing the scatter.** Measured speedup across 2k → 40k neurons is
+**2.11×, 4.01×, 2.93×, 3.50×, 2.10×** — event-driven wins at every size tested.
 
-So the win is asymptotic, not present. It is recorded here rather than smoothed
-over, because a benchmark that reports a trend it does not have is worse than no
-benchmark. See ADR-0006 for what would actually make it a wall-clock win
-(replacing the scatter with a segmented reduction).
+That is a change from the previous baseline, which measured 1.00×, 1.08×, 0.79×,
+1.32×, 1.04× — bouncing around 1.0 with no trend. The work reduction was always
+there (~97%, a 3% edge hit rate, consistently); what was missing was a wall-clock
+win, because `np.add.at` — an unbuffered scatter — dominated the per-step cost.
 
-Note also that these crossover timings are single-run and therefore noisy at
-this scale; the 0.79× and 1.32× rows are within the noise band of each other.
-Only the *work* reduction (edge hit rate) is a stable, meaningful number here.
+Replacing it with `np.bincount(weights=...)` (a segmented reduction) is what
+converted the work reduction into time. Before/after on the main benchmark:
+
+| path | before (synapses/s) | after (synapses/s) | change |
+|---|---:|---:|---:|
+| `event_driven` | 6,213,128 | 9,758,766 | **+57%** |
+| `event_driven` elapsed | 0.038 s | 0.024 s | **−37%** |
+
+`event_driven` is now the **fastest path on the main benchmark** (0.024 s vs
+0.026 s for numba and 0.028 s for numpy), which it was not before.
+
+Two caveats worth keeping:
+
+- The speedup is not monotone in population size (4.01× at 5k, 2.93× at 10k,
+  3.50× at 20k). These are single-run timings and the variation is within
+  scheduler noise. The *direction* is stable; the exact ratio is not.
+- `bincount` uses pairwise summation while `add.at` accumulates sequentially, so
+  the two are not bit-identical — measured max absolute difference 5.415e-07 on
+  sums of order 70 (~7e-9 relative). That is float64 round-off, and it is why
+  the event-driven path is still gated on a tolerance test rather than
+  bit-identity. See ADR-0006.
 
 ## Configuration
 
