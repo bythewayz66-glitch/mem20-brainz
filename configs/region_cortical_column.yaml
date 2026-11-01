@@ -1,0 +1,11 @@
+# Example region config: a toy cortical column.
+# Cell-type fractions are illustrative placeholders, NOT measured values.
+name: cortical_column_toy
+neuron_count: 1000
+layer_2_3_fraction: 0.35
+layer_4_fraction: 0.15
+layer_5_fraction: 0.30
+layer_6_fraction: 0.20
+excitatory_fraction: 0.80
+inhibitory_fraction: 0.20
+notes: Toy composition for interface testing only.

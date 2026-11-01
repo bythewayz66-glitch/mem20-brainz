@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/bythewayz66-glitch/mem20-brainz/data/schemas/dataset-manifest.schema.json",
+  "title": "External dataset manifest",
+  "description": "Pointer to a dataset held in external storage. The `measured` flag is mandatory so measured and synthetic data are never confused.",
+  "type": "object",
+  "required": ["name", "source", "url", "license", "measured"],
+  "properties": {
+    "name": { "type": "string" },
+    "source": { "type": "string" },
+    "url": { "type": "string" },
+    "checksum": { "type": "string" },
+    "license": { "type": "string" },
+    "measured": { "type": "boolean" },
+    "notes": { "type": "string" }
+  },
+  "additionalProperties": false
+}
