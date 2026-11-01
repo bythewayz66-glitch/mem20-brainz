@@ -34,8 +34,13 @@ bit-identity for it would be false.
 
 Precision
 ---------
-State is ``float64``. ``float32`` changes spike output and is therefore not
-permitted for a reference-equivalent backend (ADR-0003).
+State defaults to ``float64``, which is the only precision that is
+reference-equivalent. ``float32`` is available as an explicit opt-in
+(``precision="float32"``) because it halves state memory, but it is **not**
+reference-equivalent: measured on a heterogeneous population it drifts spike
+count by ~0.14% and agrees on only ~14% of timesteps. See ADR-0007 for the
+experiment and the decision. A backend refuses a state whose precision does not
+match its own, rather than silently up- or down-casting.
 """
 
 from __future__ import annotations
@@ -63,9 +68,14 @@ _FLOAT_FIELDS = (
 )
 
 
-def _full(value: float, n: int) -> np.ndarray:
-    """Broadcast a scalar to a float64 array of length ``n``."""
-    return np.full(n, float(value), dtype=np.float64)
+#: Supported state precisions. ``float64`` is the reference-equivalent default;
+#: ``float32`` is an opt-in memory trade documented in ADR-0007.
+_DTYPES = {"float64": np.float64, "float32": np.float32}
+
+
+def _full(value: float, n: int, dtype: type = np.float64) -> np.ndarray:
+    """Broadcast a scalar to an array of length ``n``."""
+    return np.full(n, float(value), dtype=dtype)
 
 
 @dataclass
@@ -86,17 +96,23 @@ class LIFState:
     refractory_ms: np.ndarray
     refractory_until: np.ndarray
     tier: np.ndarray
+    precision: str = "float64"
 
     def __post_init__(self) -> None:
+        if self.precision not in _DTYPES:
+            raise ValueError(
+                f"unknown precision {self.precision!r}; expected one of {sorted(_DTYPES)}"
+            )
+        dtype = _DTYPES[self.precision]
         n = len(self.v)
         for name in _FLOAT_FIELDS:
             arr = getattr(self, name)
             if len(arr) != n:
                 raise ValueError(f"LIFState field {name!r} has length {len(arr)}, expected {n}")
-            if arr.dtype != np.float64:
+            if arr.dtype != dtype:
                 raise TypeError(
-                    f"LIFState field {name!r} must be float64 (got {arr.dtype}); "
-                    "float32 changes spike output (ADR-0003)"
+                    f"LIFState field {name!r} must be {self.precision} (got {arr.dtype}); "
+                    "a mixed-precision state is not reference-equivalent (ADR-0007)"
                 )
         if len(self.tier) != n:
             raise ValueError(f"LIFState field 'tier' has length {len(self.tier)}, expected {n}")
@@ -106,7 +122,7 @@ class LIFState:
         return len(self.v)
 
     @classmethod
-    def from_neurons(cls, neurons: list[LIFNeuron]) -> LIFState:
+    def from_neurons(cls, neurons: list[LIFNeuron], precision: str = "float64") -> LIFState:
         """Build a state array from a list of reference ``LIFNeuron`` objects.
 
         This is the bridge used by the equivalence tests: the same parameters
@@ -119,23 +135,28 @@ class LIFState:
                 raise TypeError(
                     f"LIFState.from_neurons expects LIFNeuron, got {type(neuron).__name__}"
                 )
+        if precision not in _DTYPES:
+            raise ValueError(f"unknown precision {precision!r}; expected one of {sorted(_DTYPES)}")
+        dtype = _DTYPES[precision]
         return cls(
-            v=np.array([float(x.v) for x in neurons], dtype=np.float64),
-            v_rest=np.array([float(x.v_rest) for x in neurons], dtype=np.float64),
-            v_reset=np.array([float(x.v_reset) for x in neurons], dtype=np.float64),
-            v_threshold=np.array([float(x.v_threshold) for x in neurons], dtype=np.float64),
-            tau_m=np.array([float(x.tau_m) for x in neurons], dtype=np.float64),
-            r_m=np.array([float(x.r_m) for x in neurons], dtype=np.float64),
-            refractory_ms=np.array([float(x.refractory_ms) for x in neurons], dtype=np.float64),
-            refractory_until=np.array(
-                [float(x._refractory_until) for x in neurons], dtype=np.float64
-            ),
+            v=np.array([float(x.v) for x in neurons], dtype=dtype),
+            v_rest=np.array([float(x.v_rest) for x in neurons], dtype=dtype),
+            v_reset=np.array([float(x.v_reset) for x in neurons], dtype=dtype),
+            v_threshold=np.array([float(x.v_threshold) for x in neurons], dtype=dtype),
+            tau_m=np.array([float(x.tau_m) for x in neurons], dtype=dtype),
+            r_m=np.array([float(x.r_m) for x in neurons], dtype=dtype),
+            refractory_ms=np.array([float(x.refractory_ms) for x in neurons], dtype=dtype),
+            refractory_until=np.array([float(x._refractory_until) for x in neurons], dtype=dtype),
             tier=np.array([getattr(x, "tier", TIER0) for x in neurons], dtype="<U32"),
+            precision=precision,
         )
 
     @classmethod
-    def uniform(cls, n_neurons: int, **overrides: float) -> LIFState:
+    def uniform(cls, n_neurons: int, precision: str = "float64", **overrides: float) -> LIFState:
         """Build a homogeneous population using ``LIFNeuron``'s defaults."""
+        if precision not in _DTYPES:
+            raise ValueError(f"unknown precision {precision!r}; expected one of {sorted(_DTYPES)}")
+        dtype = _DTYPES[precision]
         defaults = LIFNeuron(id=0)
         params = {
             "v": defaults.v,
@@ -152,8 +173,9 @@ class LIFState:
             raise TypeError(f"unknown LIF parameter(s): {sorted(unknown)}")
         params.update(overrides)
         return cls(
-            **{name: _full(value, n_neurons) for name, value in params.items()},
+            **{name: _full(value, n_neurons, dtype) for name, value in params.items()},
             tier=np.full(n_neurons, TIER0, dtype="<U32"),
+            precision=precision,
         )
 
 
@@ -206,6 +228,11 @@ class NumPyBackend:
 
     name = "numpy"
 
+    def __init__(self, precision: str = "float64") -> None:
+        if precision not in _DTYPES:
+            raise ValueError(f"unknown precision {precision!r}; expected one of {sorted(_DTYPES)}")
+        self.precision = precision
+
     def step(
         self,
         state: LIFState,
@@ -220,8 +247,14 @@ class NumPyBackend:
                 f"NumPyBackend implements only {TIER0!r}; population contains {bad}. "
                 "Refusing to substitute a cheaper model (ADR-0002)."
             )
+        if state.precision != self.precision:
+            raise ValueError(
+                f"NumPyBackend(precision={self.precision!r}) cannot step a "
+                f"{state.precision!r} state; construct the backend with the same "
+                "precision as the state (ADR-0007)"
+            )
 
-        i_inj = np.broadcast_to(np.asarray(i_inj, dtype=np.float64), state.v.shape)
+        i_inj = np.broadcast_to(np.asarray(i_inj, dtype=_DTYPES[self.precision]), state.v.shape)
 
         # A refractory neuron neither integrates nor spikes; its v is untouched.
         active = t >= state.refractory_until

@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .backend import TIER0, LIFState
+from .backend import _DTYPES, TIER0, LIFState
 
 #: Message used when numba is not installed. Kept as a constant so the test can
 #: assert on it without duplicating the wording.
@@ -105,7 +105,10 @@ class NumbaBackend:
 
     _kernel = None
 
-    def __init__(self) -> None:
+    def __init__(self, precision: str = "float64") -> None:
+        if precision not in _DTYPES:
+            raise ValueError(f"unknown precision {precision!r}; expected one of {sorted(_DTYPES)}")
+        self.precision = precision
         # Fail fast and clearly if numba is missing, rather than at first step.
         _require_numba()
 
@@ -129,12 +132,18 @@ class NumbaBackend:
                 f"NumbaBackend implements only {TIER0!r}; population contains {bad}. "
                 "Refusing to substitute a cheaper model (ADR-0002)."
             )
+        if state.precision != self.precision:
+            raise ValueError(
+                f"NumbaBackend(precision={self.precision!r}) cannot step a "
+                f"{state.precision!r} state; construct the backend with the same "
+                "precision as the state (ADR-0007)"
+            )
 
-        i_inj = np.broadcast_to(np.asarray(i_inj, dtype=np.float64), state.v.shape)
+        i_inj = np.broadcast_to(np.asarray(i_inj, dtype=_DTYPES[self.precision]), state.v.shape)
         # The kernel writes into a contiguous buffer; broadcast views are not
         # writable, so materialise when needed.
         if not i_inj.flags.writeable or not i_inj.flags.c_contiguous:
-            i_inj = np.ascontiguousarray(i_inj, dtype=np.float64)
+            i_inj = np.ascontiguousarray(i_inj, dtype=_DTYPES[self.precision])
 
         spiked = np.zeros(state.n_neurons, dtype=np.bool_)
         kernel = self._get_kernel()
