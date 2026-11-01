@@ -1,6 +1,23 @@
 #!/usr/bin/env python3
 """Fit a synaptic drive to a target spike rate, using jax.grad.
 
+**STATUS: BROKEN — do not use this as evidence that fitting works.**
+
+This script does not currently converge. Measured on 2026-11-01: it drives the
+fitted current to a large negative value and the population to 0 Hz, leaving a
+rate error of -40 Hz against a 40 Hz target. An earlier variant diverged the
+other way, to 500 Hz. Neither is a working fit.
+
+The cause is the surrogate gradient described below: the derivative is taken
+through a smooth proxy rather than through the spike train, so the search
+direction is not the gradient of the objective. For a 1-D monotone problem that
+*should* still work, which means there is an additional bug in the update rule
+or the loss scaling that has not been found yet.
+
+It is kept in the tree because the reasoning about surrogate gradients is worth
+preserving, and because deleting a broken thing quietly is worse than labelling
+it. It is not imported by the package and not run in CI.
+
 This is the reason the JAX backend exists. The other backends can run a
 simulation; only this one can differentiate through it.
 
