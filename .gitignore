@@ -60,3 +60,8 @@ web/dist/
 
 # TypeScript incremental build info
 web/tsconfig.tsbuildinfo
+
+# Vite build cache (web/)
+web/.vite/
+web/dist/
+web/node_modules/

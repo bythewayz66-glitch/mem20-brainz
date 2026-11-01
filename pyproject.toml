@@ -21,9 +21,13 @@ classifiers = [
 dependencies = ["numpy>=1.24"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.4", "ruff>=0.4,<0.18"]
+# httpx is required by fastapi.testclient. It lives in dev as well as in the
+# server extra because the base test job collects tests/test_server.py: without
+# it, collection fails outright rather than skipping, which would make the
+# default `pytest` run unusable in a clean venv.
+dev = ["pytest>=7.4", "ruff>=0.4,<0.18", "httpx>=0.27"]
 viz = ["matplotlib>=3.7"]
-# Live observability layer (ADR-0008). Optional: the package must install and
+# Live observability layer (ADR-0009). Optional: the package must install and
 # run without a web server.
 server = ["fastapi>=0.110", "uvicorn[standard]>=0.27", "httpx>=0.27"]
 # Optional JIT backend. Deliberately NOT a base dependency: the package must
