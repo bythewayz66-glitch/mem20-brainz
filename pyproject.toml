@@ -29,6 +29,9 @@ server = ["fastapi>=0.110", "uvicorn[standard]>=0.27", "httpx>=0.27"]
 # Optional JIT backend. Deliberately NOT a base dependency: the package must
 # install and run with numpy alone.
 numba = ["numba>=0.59"]
+# Optional differentiable backend. Also not a base dependency: it is heavy, and
+# only the parameter-fitting path needs it (ADR-0008).
+jax = ["jax>=0.4"]
 
 [project.urls]
 Homepage = "https://github.com/bythewayz66-glitch/mem20-brainz"

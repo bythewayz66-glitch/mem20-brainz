@@ -204,7 +204,7 @@ no feelings; see [`docs/readout.md`](docs/readout.md).
 
 FastAPI app, frame schema, run lifecycle, stimulus injection, aggregation and
 serialisation. **Contains no simulation arithmetic** — every voltage update
-happens in the `Backend` behind `VectorizedEngine` (ADR-0008).
+happens in the `Backend` behind `VectorizedEngine` (ADR-0009).
 
 **Owns:** the wire format, the run lifecycle, per-region aggregation, the
 headless mode.

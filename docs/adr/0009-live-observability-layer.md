@@ -1,4 +1,4 @@
-# ADR-0008 — Live observability layer
+# ADR-0009 — Live observability layer
 
 - **Status:** Accepted
 - **Date:** 2026-11-01
