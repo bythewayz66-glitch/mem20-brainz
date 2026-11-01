@@ -48,6 +48,63 @@ jobs:
         # failure is unambiguous in the job log.
         run: pytest -q -m slow
 
+  server:
+    name: observability server (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install package with the server extra
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,server]"
+
+      - name: Verify the server extra is actually installed
+        # Without this, a broken extra would turn the server tests into
+        # collection errors that could be mistaken for an environment problem.
+        run: python -c "import fastapi, uvicorn, httpx; print('fastapi', fastapi.__version__)"
+
+      - name: Run readout and server tests
+        run: pytest -q tests/test_readout.py tests/test_server.py
+
+      - name: Run the headless mode
+        # Proves the observability layer works without a browser, which is the
+        # whole point of having a headless path.
+        run: python -m mem20_brainz.server.headless --steps 120 --stimulus threat --every 40
+
+  frontend:
+    name: frontend build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Typecheck and build
+        working-directory: web
+        run: npm run build
+
   numba:
     name: numba backend (py${{ matrix.python-version }})
     runs-on: ubuntu-latest

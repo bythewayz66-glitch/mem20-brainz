@@ -29,6 +29,14 @@ module boundaries, the interfaces between them, and the decisions behind them.
 ┌──────────────────────────────────────────────────────────────┐
 │  scripts/            CLI entry points: ingest, build, bench  │
 ├──────────────────────────────────────────────────────────────┤
+│  web/                React frontend (separate toolchain)     │
+├──────────────────────────────────────────────────────────────┤
+│  server/             streaming, frames, orchestration only   │
+├──────────────────────────────────────────────────────────────┤
+│  readout/            named states from measured quantities   │
+├──────────────────────────────────────────────────────────────┤
+│  scenarios/          synthetic network builders + provenance │
+├──────────────────────────────────────────────────────────────┤
 │  simulation/         stepping loop, scheduling, partitioning │
 ├──────────────────────────────────────────────────────────────┤
 │  neurons/   synapses/   regions/   connectome/               │
@@ -172,6 +180,46 @@ version.
 Read-only plotting over run outputs. Matplotlib is an optional extra; importing
 `mem20_brainz` must never require it.
 
+### `scenarios/` — **implemented (synthetic only)**
+
+Builds fully specified, reproducible networks plus the metadata needed to
+describe them honestly. `build_demo_network` produces a 5-region synthetic
+network (580 neurons, ~31k synapses) with generator name, version, seed and
+parameters recorded in `provenance`.
+
+**Owns:** network construction, region layout, provenance records.
+**Must not own:** stepping, aggregation, or any readout arithmetic.
+
+### `readout/` — **implemented (explicitly a proxy)**
+
+Maps measured simulation quantities onto named states. Every value carries its
+raw inputs, its formula, and `provenance="derived_proxy"`.
+
+**Owns:** the mapping from quantities to names, and the documentation of that
+mapping as a design choice.
+**Must not own:** simulation state, or any claim about experience. The model has
+no feelings; see [`docs/readout.md`](docs/readout.md).
+
+### `server/` — **implemented (orchestration only)**
+
+FastAPI app, frame schema, run lifecycle, stimulus injection, aggregation and
+serialisation. **Contains no simulation arithmetic** — every voltage update
+happens in the `Backend` behind `VectorizedEngine` (ADR-0008).
+
+**Owns:** the wire format, the run lifecycle, per-region aggregation, the
+headless mode.
+**Must not own:** membrane equations, spike logic, or readout formulas.
+
+### `web/` — **implemented (separate toolchain)**
+
+React + Vite frontend. Consumes the versioned frame schema over WebSocket and
+refuses a version it does not know. Discards the last frame on disconnect rather
+than showing stale data as live.
+
+**Owns:** rendering and interaction.
+**Must not own:** any arithmetic that affects a reported number — readouts are
+computed server-side so they stay testable in Python.
+
 ## Data flow of one timestep
 
 ```
@@ -206,6 +254,8 @@ with context, decision, consequences and status. The index is
 | [0004](docs/adr/0004-provenance-and-versioning.md) | Record-level provenance and immutable dataset versioning | accepted |
 | [0005](docs/adr/0005-partitioning-and-chunking.md) | Chunked, partitioned connectome layout | accepted |
 | [0006](docs/adr/0006-event-driven-delivery.md) | Event-driven spike delivery over a CSR connectome | accepted |
+| [0007](docs/adr/0007-numeric-precision.md) | Numeric precision: float64 default, float32 opt-in | accepted |
+| [0008](docs/adr/0008-live-observability-layer.md) | Live observability layer: streaming server, frontend, affective readout proxies | accepted |
 
 An earlier draft of this document listed five provisional decisions under
 different titles (implementation language, sparse storage,

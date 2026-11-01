@@ -5,12 +5,13 @@ scale of individual neurons — one modeled unit per neuron, ~86 billion of them
 connected by ~100 trillion synapses.**
 
 > **Status: pre-alpha scaffold (v0.0.1).** This repository currently contains a
-> project skeleton, data containers, a reference simulation loop, and three
-> engines (NumPy, Numba, and a CSR event-driven path) that are checked against
-> that reference. It does **not** contain a brain model, real connectome data, or
-> any brain-scale capability. Every claim below is labelled as *implemented* or
-> *aspirational*. Please read [Current status](#current-status) before anything
-> else.
+> project skeleton, data containers, a reference simulation loop, three engines
+> (NumPy, Numba, and a CSR event-driven path) checked against that reference, and
+> a live observability layer (streaming server + web frontend) for watching a
+> small synthetic network run. It does **not** contain a brain model, real
+> connectome data, or any brain-scale capability. Every claim below is labelled
+> as *implemented* or *aspirational*. Please read
+> [Current status](#current-status) before anything else.
 
 ---
 
@@ -184,13 +185,26 @@ What is **actually implemented** in this repository today:
       `--check` mode that fails when the baseline goes stale
 - [x] `io` — JSON config/fixture loading, flat-YAML fallback parser
 - [x] `viz` — optional matplotlib spike raster
+- [x] `scenarios` — `build_demo_network`: a synthetic 5-region network (580
+      neurons, ~31k synapses) with generator, seed and parameters recorded in
+      provenance
+- [x] `readout` — five named states (arousal, valence, surprise, confusion,
+      fear-like) computed from measured simulation quantities, each tagged
+      `provenance="derived_proxy"` and carrying its raw inputs and formula
+- [x] `server` — FastAPI app: REST control (start/pause/reset/step/config/
+      stimulus), a versioned frame schema, and a WebSocket stream
+- [x] `server` — headless mode (`python -m mem20_brainz.server.headless`) that
+      prints a text summary, so the layer is testable without a browser
+- [x] `web/` — React + Vite frontend: canvas population view, spike/readout
+      timeline, readout gauges with expandable arithmetic, controls, status bar,
+      and an explicit disconnected state
 - [x] `tests` — smoke tests plus bit-identity equivalence tests (including a
-      10⁴-neuron fixed-seed case)
-- [x] `scripts` — fixture validator, build helper, micro-benchmark
+      10⁴-neuron fixed-seed case), readout unit tests, and server/WebSocket tests
+- [x] `scripts` — fixture validator, build helper, micro-benchmark, `dev.sh`
 - [x] JSON Schemas for connectome fixtures, neuron records, dataset manifests
-- [x] Six ADRs in [`docs/adr/`](docs/adr/README.md) with an index
+- [x] Eight ADRs in [`docs/adr/`](docs/adr/README.md) with an index
 - [x] CI: `pytest` + `ruff` on push and pull request, Python 3.11 and 3.12,
-      plus a numba job and a benchmark-baseline check
+      plus numba, server, frontend-build and benchmark-baseline jobs
 
 What is **not** implemented, and is not claimed:
 
@@ -204,6 +218,9 @@ What is **not** implemented, and is not claimed:
 - [ ] Any region atlas or anatomical parcellation
 - [ ] Any plasticity
 - [ ] Any brain-scale run of any kind
+- [ ] **Any feeling, emotion, or subjective experience.** The affective readouts
+      are engineering proxies over simulation state. See
+      [`docs/readout.md`](docs/readout.md).
 
 If you are looking for a working brain simulation, this is not it yet. If you
 are looking for a place to build one in the open, with the honesty constraints
@@ -278,6 +295,83 @@ spikes = engine.run(steps=100, external_current=np.full(4, 50.0))
 print(f"{spikes} spikes in {engine.t:.1f} ms of simulated time")
 ```
 
+## Watching it run
+
+There is a live observability layer: a streaming server over the existing engine,
+and a web frontend that renders the population, the spike timeline, and the
+derived readouts in real time.
+
+```bash
+# install the server extra
+pip install -e ".[dev,server]"
+
+# start backend + frontend together (Ctrl-C stops both)
+./scripts/dev.sh
+# → backend  http://127.0.0.1:8000
+# → frontend http://127.0.0.1:5173   ← open this
+```
+
+Or run the halves separately:
+
+```bash
+python -m mem20_brainz.server            # backend only, port 8000
+cd web && npm install && npm run dev     # frontend only, port 5173
+```
+
+No browser? The headless mode prints the same numbers the frontend receives:
+
+```bash
+python -m mem20_brainz.server.headless --steps 400 --stimulus threat --every 50
+```
+
+```
+mem20-brainz — headless run
+====================================================================
+backend      : numpy
+neurons      : 580
+synapses     : 30,729
+data kind    : synthetic  (synthetic — not measured)
+steps        : 400
+total spikes : 1,842
+throughput   : 412.3 steps/s
+stimulus     : threat @ 6.0 for 200.0 ms
+
+  step      t_ms  spikes  readouts
+--------------------------------------------------------------------
+  1000     100.0      12  arousal=0.216  valence=-0.058  surprise=0.024  confusion=0.187  fear_like=0.000
+  1050     105.0      31  arousal=0.402  valence=0.113  surprise=0.198  confusion=0.244  fear_like=0.041
+  ...
+
+NOTE: the readouts above are derived proxies over simulation state.
+      The model has no feelings. See docs/readout.md.
+```
+
+### What you are looking at
+
+- **Population** — one dot per neuron, coloured by region, brightness driven by
+  membrane potential, white rings on spikes. The coordinates are *display*
+  coordinates from the scenario, not soma positions in any anatomical space.
+- **Timeline** — spikes per frame on top, readout traces below.
+- **Affective readout** — five gauges. Expand any one to see the measured inputs
+  and the exact formula behind the number.
+- **Controls** — play/pause, reset, stimulus injection (pick a region, strength,
+  duration), and sliders for steps-per-frame, baseline rate and tonic drive.
+- **Status bar** — backend, engine, neuron/synapse counts, steps/s, and a
+  provenance chip that says `data: synthetic — not measured`.
+
+### The readouts are proxies, not feelings
+
+**The model does not have feelings.** It is a leaky integrate-and-fire network
+with placeholder parameters and synthetic connectivity. The named states
+(arousal, valence, surprise, confusion, fear-like) are a fixed, documented mapping
+from *measurable* simulation quantities — firing rates, excitatory/inhibitory
+drive, cross-region dispersion, population synchrony — onto legible labels.
+
+Every readout returns its raw inputs and its formula, is tagged
+`provenance="derived_proxy"`, and is labelled as such in the UI. The mapping is a
+design choice, not a finding. Read [`docs/readout.md`](docs/readout.md) before
+using any of these numbers in a claim.
+
 ## Repository layout
 
 ```
@@ -297,19 +391,27 @@ mem20-brainz/
 │   ├── roadmap.md
 │   ├── data-model.md
 │   ├── glossary.md
-│   ├── adr/               # architecture decision records 0001-0006
+│   ├── readout.md         # what the affective proxies are, and are not
+│   ├── adr/               # architecture decision records 0001-0008
 │   └── benchmarks/        # committed baseline.json + how to run it
-├── .github/workflows/     # CI: pytest + ruff, numba job, benchmark check
-├── scripts/               # ingestion, build, benchmark helpers
+├── .github/workflows/     # CI: pytest + ruff, numba, server, frontend, benchmark
+├── scripts/               # ingestion, build, benchmark, dev.sh
+├── web/                   # React + Vite frontend for the live stream
+│   └── src/
+│       ├── components/    # canvas, timeline, gauges, controls, status bar
+│       └── lib/           # wire types, WebSocket hook, REST client
 ├── src/mem20_brainz/
 │   ├── neurons/           # neuron models
 │   ├── synapses/          # synapse models
 │   ├── regions/           # region containers
 │   ├── connectome/        # sparse storage + CSR view
 │   ├── simulation/        # reference engine, Backend protocol, NumPy/Numba, event-driven
+│   ├── scenarios/         # synthetic demo network (provenance-tagged)
+│   ├── readout/           # affective proxies (derived_proxy, not feelings)
+│   ├── server/            # FastAPI streaming server + headless mode
 │   ├── io/                # config and fixture I/O
 │   └── viz/               # plotting (optional)
-└── tests/                 # smoke and bit-identity equivalence tests
+└── tests/                 # smoke, equivalence, readout and server tests
 ```
 
 ## How to contribute

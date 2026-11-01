@@ -47,6 +47,10 @@ can be built behind them without changing callers. **Met.**
 - [x] Event-driven delivery: only touch edges whose `pre` fired
       (tolerance-gated, not bit-identical — ADR-0006)
 - [x] Benchmark harness with a recorded baseline (synapses/s, neurons/s)
+- [x] Live observability layer: streaming server, frame schema, React frontend,
+      headless mode (ADR-0008)
+- [x] Affective readout proxies with inputs, formula and `derived_proxy` tag
+      ([`docs/readout.md`](docs/readout.md))
 
 **Exit criterion:** 10⁶ LIF neurons for 1 second of biological time (10,000
 steps) on a single GPU, with spike output bit-identical to the reference
