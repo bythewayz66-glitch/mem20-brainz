@@ -28,6 +28,8 @@ jobs:
           cache: pip
 
       - name: Install package and dev tools
+        # Base install only: numba is an optional extra, and the package must
+        # work without it. The numba job below covers the JIT path.
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
@@ -45,3 +47,62 @@ jobs:
         # The 10^4-neuron bit-identity case. Kept as a separate step so a
         # failure is unambiguous in the job log.
         run: pytest -q -m slow
+
+  numba:
+    name: numba backend (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install package with the numba extra
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,numba]"
+
+      - name: Verify numba is actually installed
+        # Without this, a broken extra would silently turn the numba tests into
+        # skips and the job would pass while testing nothing.
+        run: python -c "import numba; print('numba', numba.__version__)"
+
+      - name: Run numba equivalence tests
+        run: pytest -q tests/test_numba_equivalence.py -rs
+
+      - name: Run numba slow case
+        run: pytest -q -m slow tests/test_numba_equivalence.py
+
+  benchmark:
+    name: benchmark baseline is current
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install package with the numba extra
+        # The baseline records a numba row, so the extra is needed for the
+        # comparison to be like-for-like.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,numba]"
+
+      - name: Check the committed baseline is not stale
+        # Fails if the benchmark config, package version, or any path's spike
+        # count has changed. Timings are deliberately not asserted on: they vary
+        # run to run and would make this job flaky.
+        run: python scripts/benchmark.py --check

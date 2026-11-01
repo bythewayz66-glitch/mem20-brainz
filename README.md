@@ -5,11 +5,12 @@ scale of individual neurons — one modeled unit per neuron, ~86 billion of them
 connected by ~100 trillion synapses.**
 
 > **Status: pre-alpha scaffold (v0.0.1).** This repository currently contains a
-> project skeleton, data containers, a reference simulation loop, and a
-> vectorised NumPy backend that is bit-identical to that reference. It does
-> **not** contain a brain model, real connectome data, or any brain-scale
-> capability. Every claim below is labelled as *implemented* or *aspirational*.
-> Please read [Current status](#current-status) before anything else.
+> project skeleton, data containers, a reference simulation loop, and three
+> engines (NumPy, Numba, and a CSR event-driven path) that are checked against
+> that reference. It does **not** contain a brain model, real connectome data, or
+> any brain-scale capability. Every claim below is labelled as *implemented* or
+> *aspirational*. Please read [Current status](#current-status) before anything
+> else.
 
 ---
 
@@ -114,6 +115,22 @@ with the per-neuron Python loop replaced by an elementwise array kernel. It is
 fixed-seed case. It is still single-process and O(synapses) per step; it is not
 a brain-scale engine.
 
+**Also implemented:** `NumbaBackend` — the same kernel JIT-compiled, also
+**bit-identical** (compiled with `fastmath=False`; FMA contraction would break
+it, so the equivalence test is what actually proves it on each platform). Numba
+is an optional extra (`pip install 'mem20-brainz[numba]'`), imported lazily.
+
+**Also implemented:** `EventDrivenEngine` over a `CSRConnectome` — delivery
+visits only the out-edges of neurons that fired, cutting work by ~97% in the
+benchmark configuration. It is **not** bit-identical (different float addition
+order; measured drift 5.4 × 10⁻⁹, no spike flips observed) and is gated on a
+tolerance test — see [ADR-0006](docs/adr/0006-event-driven-delivery.md).
+
+**Honest caveat on that optimisation:** it reduces *work*, not yet *time*.
+`np.add.at` dominates the per-step cost, so event-driven delivery is slower than
+the NumPy scan at 2,000 neurons and only modestly faster at 20,000. The win is
+asymptotic. Numbers: [`docs/benchmarks/`](docs/benchmarks/README.md).
+
 **Aspirational:** the production engine. The intended stack, in order of
 adoption:
 
@@ -121,9 +138,10 @@ adoption:
    arrays; remove per-neuron Python objects. *(done)*
 2. **Numba or JAX kernels** — JIT the inner loop; JAX additionally gives
    autodiff for parameter fitting and `vmap`/`pmap` for batching and multi-device
-   execution.
+   execution. *(Numba done; JAX pending)*
 3. **Sparse event-driven delivery** — spikes are sparse; deliver them as index
    lists into a precomputed CSR structure rather than scanning all edges.
+   *(done, tolerance-gated)*
 4. **MPI or a task-graph runtime** — partition neurons across nodes, exchange
    only boundary spikes each timestep.
 5. **GPU offload** — for the dense per-neuron state updates, with the sparse
@@ -156,22 +174,33 @@ What is **actually implemented** in this repository today:
       `NumPyBackend` that is **bit-identical** to the reference loop
 - [x] `simulation` — `VectorizedEngine`: the reference semantics with the
       per-neuron loop replaced by an array kernel
+- [x] `simulation` — `NumbaBackend`: JIT kernel, **bit-identical** to the
+      reference, optional dependency
+- [x] `connectome` — `CSRConnectome`: row-compressed view indexed by
+      presynaptic neuron
+- [x] `simulation` — `EventDrivenEngine`: CSR delivery, tolerance-gated
+      (ADR-0006)
+- [x] `scripts/benchmark.py` — harness with a committed JSON baseline and a
+      `--check` mode that fails when the baseline goes stale
 - [x] `io` — JSON config/fixture loading, flat-YAML fallback parser
 - [x] `viz` — optional matplotlib spike raster
 - [x] `tests` — smoke tests plus bit-identity equivalence tests (including a
       10⁴-neuron fixed-seed case)
 - [x] `scripts` — fixture validator, build helper, micro-benchmark
 - [x] JSON Schemas for connectome fixtures, neuron records, dataset manifests
-- [x] Five ADRs in [`docs/adr/`](docs/adr/README.md) with an index
-- [x] CI: `pytest` + `ruff` on push and pull request, Python 3.11 and 3.12
+- [x] Six ADRs in [`docs/adr/`](docs/adr/README.md) with an index
+- [x] CI: `pytest` + `ruff` on push and pull request, Python 3.11 and 3.12,
+      plus a numba job and a benchmark-baseline check
 
 What is **not** implemented, and is not claimed:
 
 - [ ] Any measured connectome data, or any reader for it
 - [ ] Any biologically validated neuron or synapse model
-- [ ] Any JIT, GPU, or distributed execution (the NumPy backend is vectorised but
-      still single-process and O(synapses) per step)
-- [ ] Any CSR / event-driven delivery
+- [ ] Any GPU or distributed execution (all engines are single-process; the
+      scan-based paths are still O(synapses) per step)
+- [ ] Any JAX backend, or autodiff for parameter fitting
+- [ ] Any wall-clock win from event-driven delivery (it cuts work, not time —
+      `np.add.at` is the bottleneck)
 - [ ] Any region atlas or anatomical parcellation
 - [ ] Any plasticity
 - [ ] Any brain-scale run of any kind
@@ -209,8 +238,11 @@ pip install -e ".[dev]"
 # run the test suite
 pytest
 
-# micro-benchmark the reference engine
-python scripts/benchmark.py --neurons 1000 --p 0.01 --steps 100
+# micro-benchmark every engine path (writes docs/benchmarks/baseline.json)
+python scripts/benchmark.py --markdown
+
+# fail if the committed baseline is stale relative to the code
+python scripts/benchmark.py --check
 
 # validate a small connectome fixture
 python scripts/ingest_connectome.py data/fixtures/tiny_connectome.json
@@ -265,15 +297,16 @@ mem20-brainz/
 │   ├── roadmap.md
 │   ├── data-model.md
 │   ├── glossary.md
-│   └── adr/               # architecture decision records 0001-0005
-├── .github/workflows/     # CI: pytest + ruff on 3.11 and 3.12
+│   ├── adr/               # architecture decision records 0001-0006
+│   └── benchmarks/        # committed baseline.json + how to run it
+├── .github/workflows/     # CI: pytest + ruff, numba job, benchmark check
 ├── scripts/               # ingestion, build, benchmark helpers
 ├── src/mem20_brainz/
 │   ├── neurons/           # neuron models
 │   ├── synapses/          # synapse models
 │   ├── regions/           # region containers
-│   ├── connectome/        # sparse connectivity storage
-│   ├── simulation/        # reference engine + Backend protocol + NumPy backend
+│   ├── connectome/        # sparse storage + CSR view
+│   ├── simulation/        # reference engine, Backend protocol, NumPy/Numba, event-driven
 │   ├── io/                # config and fixture I/O
 │   └── viz/               # plotting (optional)
 └── tests/                 # smoke and bit-identity equivalence tests

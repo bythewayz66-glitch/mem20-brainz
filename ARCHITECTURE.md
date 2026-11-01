@@ -94,15 +94,30 @@ construction goes through `from_arrays`.
 **Planned:** CSR/CSC views, sharded on-disk format, and a streaming iterator that
 yields only the edges whose presynaptic neuron fired this timestep.
 
-### `simulation/` — **implemented (reference + NumPy backend)**
+### `simulation/` — **implemented (reference + three engines)**
 
-Owns time. Two engines, and the difference between them is the point:
+Owns time. Three engines, and the difference between them is the point:
 
 - `SimulationEngine` — the **reference**. A per-neuron Python loop. Slow,
   correct, and frozen as ground truth (ADR-0003). It is never optimised.
 - `VectorizedEngine` — the same semantics with the per-neuron loop replaced by a
-  `Backend`. Currently backed by `NumPyBackend`, which is **bit-identical** to
-  the reference and verified as such in CI.
+  `Backend`. Backed by `NumPyBackend` or `NumbaBackend`, both **bit-identical**
+  to the reference and verified as such in CI.
+- `EventDrivenEngine` — same semantics, but delivery uses a CSR lookup instead
+  of a full edge scan. **Not** bit-identical (ADR-0006); gated on a
+  tolerance-based test.
+
+**Backend table:**
+
+| backend | dependency | bit-identical | notes |
+|---|---|---|---|
+| `NumPyBackend` | numpy (base) | yes | elementwise array kernel |
+| `NumbaBackend` | `numba` (optional extra) | yes | JIT, `fastmath=False`, lazy import |
+| *(JAX)* | — | — | planned; enables autodiff |
+
+`NumbaBackend` is imported lazily and is **not** a base dependency: `import
+mem20_brainz` must work with numpy alone. A missing numba raises an actionable
+`ImportError` rather than failing at import time.
 
 **Contract:** fixed `dt`; spikes emitted at step *k* are delivered at step
 *k + ceil(delay/dt)*; `spike_history[k]` is the list of neuron ids that spiked at
@@ -116,10 +131,30 @@ part of the contract. A backend that does not implement a tier must raise, never
 substitute (ADR-0002). State is `float64`; `float32` changes spike output and is
 refused.
 
-**Planned:** Numba and JAX backends, a CSR view with event-driven delivery, and a
-partitioner. Note that CSR event-driven delivery is *not* bit-identical to the
-reference (different float addition order), so it will be gated on a
-tolerance-based test with a stated bound rather than a bit-identity claim.
+**CSR and event-driven delivery** (ADR-0006). `CSRConnectome` in
+`connectome/csr.py` stores `indptr` (int64), `indices` (int32), `weights` and
+`delays` (float32), indexed by **presynaptic** neuron — the simulation asks
+"given the neurons that fired, which synapses fire?", which is an out-edge query.
+The build is a *stable* sort on `pre`, so within-row order is preserved.
+
+`EventDrivenEngine` replaces the O(E) scan with `edge_indices_for(spikes)`, a
+vectorised gather that touches only the rows of neurons that fired. Cost becomes
+proportional to activity rather than connectome size.
+
+**This path is not bit-identical.** Summing in CSR order rather than edge-list
+order is a different order of float additions; measured drift is up to
+5.4 × 10⁻⁹ relative on a high-fan-in case. No spike flips were observed in any
+tested regime, but that is an observation about this LIF model, not a guarantee,
+so the gate is a tolerance test (`SPIKE_COUNT_TOLERANCE` 1%,
+`PER_STEP_AGREEMENT` 95%) rather than a bit-identity claim. One case *is* exact:
+when the edge list is already grouped by `pre`, CSR order equals edge-list order.
+
+**Known limitation:** `indices` is `int32`, capping the population at
+2,147,483,647 neurons — 86 × 10⁹ exceeds that by 40×. This view is correct for
+the 10⁴–10⁸ range Phases 1–4 run at; widening to `int64` costs 400 TB at 10¹⁴
+synapses and is deferred.
+
+**Planned:** JAX backend and the partitioner.
 
 ### `io/` — **implemented (minimal)**
 
@@ -154,8 +189,8 @@ spike_history[k-1]  ──►  gather edges whose pre ∈ spikes
 
 This is the shape the fast backends must preserve. The optimisation is to
 replace the per-neuron loop with an array kernel and the edge gather with a
-precomputed CSR slice — not to change the semantics. The array-kernel half of
-that is done (`VectorizedEngine`); the CSR half is not.
+precomputed CSR slice — not to change the semantics. Both halves are now done:
+`VectorizedEngine` for the kernel, `EventDrivenEngine` for the gather.
 
 ## Architecture Decision Records
 
@@ -170,6 +205,7 @@ with context, decision, consequences and status. The index is
 | [0003](docs/adr/0003-simulation-backend.md) | Simulation backend stack and the `Backend` boundary | accepted |
 | [0004](docs/adr/0004-provenance-and-versioning.md) | Record-level provenance and immutable dataset versioning | accepted |
 | [0005](docs/adr/0005-partitioning-and-chunking.md) | Chunked, partitioned connectome layout | accepted |
+| [0006](docs/adr/0006-event-driven-delivery.md) | Event-driven spike delivery over a CSR connectome | accepted |
 
 An earlier draft of this document listed five provisional decisions under
 different titles (implementation language, sparse storage,

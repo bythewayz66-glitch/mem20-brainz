@@ -23,7 +23,7 @@ interfaces.
 - [x] Smoke test suite
 - [x] JSON Schemas for fixtures, neuron records, dataset manifests
 - [x] Mission README with an explicit implemented/aspirational split
-- [x] ADR directory populated (`docs/adr/0001`–`0005`) with an index
+- [x] ADR directory populated (`docs/adr/0001`–`0006`) with an index
 - [x] CI: `pytest` + `ruff` on push and pull request (Python 3.11 and 3.12)
 
 **Exit criterion:** `pip install -e ".[dev]"` and `pytest` pass on a clean
@@ -41,21 +41,28 @@ can be built behind them without changing callers. **Met.**
 - [x] `Backend` protocol: `step(state, i_inj, dt, t) -> spike_mask`
 - [x] NumPy backend (vectorised state update), **bit-identical** to the reference
 - [x] Equivalence tests: bit-identical spikes on a 10⁴-neuron fixed-seed case
-- [ ] Numba backend (JIT inner loop)
+- [x] Numba backend (JIT inner loop), **bit-identical** to the reference
 - [ ] JAX backend (JIT + `vmap`; enables autodiff for parameter fitting)
-- [ ] CSR connectome view with precomputed per-neuron incoming slices
-- [ ] Event-driven delivery: only touch edges whose `pre` fired
-- [ ] Benchmark harness with a recorded baseline (synapses/s, neurons/s)
+- [x] CSR connectome view indexed by presynaptic neuron
+- [x] Event-driven delivery: only touch edges whose `pre` fired
+      (tolerance-gated, not bit-identical — ADR-0006)
+- [x] Benchmark harness with a recorded baseline (synapses/s, neurons/s)
 
 **Exit criterion:** 10⁶ LIF neurons for 1 second of biological time (10,000
 steps) on a single GPU, with spike output bit-identical to the reference
 implementation on a 10⁴-neuron test case.
 
-**Note on the remaining Phase 1 items:** CSR event-driven delivery is *not*
-bit-identical to the reference, because summing incoming weights in CSR order
-rather than edge order is a different order of float additions. It will be gated
-on a tolerance-based equivalence test with a stated bound, and the ADR that
-introduces it must say so (see ADR-0003).
+**Note on CSR event-driven delivery:** it is *not* bit-identical to the
+reference, because summing incoming weights in CSR order rather than edge order
+is a different order of float additions. It is gated on a tolerance-based
+equivalence test with a stated bound (ADR-0006). Measured: the delivery sums
+differ by up to 5.4 × 10⁻⁹ relative, and no spike flips were observed in any
+tested regime — but that is an observation, not a guarantee.
+
+**Note on the benchmark result:** event-driven delivery reduces *work* by ~97%
+(3% edge hit rate) but does **not** yet reduce wall time, because `np.add.at`
+dominates the per-step cost. The win is asymptotic. See
+[`docs/benchmarks/`](docs/benchmarks/README.md) and ADR-0006.
 
 ---
 
