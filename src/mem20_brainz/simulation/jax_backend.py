@@ -248,6 +248,66 @@ def simulate_jax(
     return jnp.stack(counts)
 
 
+def default_device_kind() -> str:
+    """Platform of the default JAX device: ``'cpu'``, ``'gpu'`` or ``'tpu'``.
+
+    Recorded by any run that uses JAX, so a number can never be attributed to a
+    GPU it did not use. XLA picks the device automatically; nothing here selects
+    one explicitly, so the same code runs on CPU today and on a GPU where one
+    exists.
+    """
+    jax, _ = _require_jax()
+    return jax.default_backend()
+
+
+def simulate_jax_scan(
+    state: LIFState,
+    i_inj_per_step: np.ndarray,
+    dt: float = 0.1,
+):
+    """Whole-loop LIF simulation as one ``lax.scan``, device-resident.
+
+    :class:`JAXBackend` steps one timestep at a time and copies the state back to
+    NumPy after every step. That round-trip is invisible on a CPU, but on a GPU
+    it is the whole problem: a host copy per timestep leaves the device idle
+    between steps, so the kernel never runs at device speed. This function keeps
+    every array on the device for the entire run — the shape a GPU run needs.
+
+    Feedforward, like :func:`simulate_jax`: there is no recurrent delivery inside
+    the traced loop (ADR-0008). Returns the per-step spike counts as a JAX array
+    of shape ``(steps,)``.
+    """
+    jax, jnp = _require_jax()
+    dtype = _DTYPES[state.precision]
+
+    arrays0 = tuple(
+        jnp.asarray(a)
+        for a in (
+            state.v,
+            state.v_rest,
+            state.v_reset,
+            state.v_threshold,
+            state.tau_m,
+            state.r_m,
+            state.refractory_ms,
+            state.refractory_until,
+        )
+    )
+    drive = jnp.asarray(np.asarray(i_inj_per_step, dtype=dtype))
+    steps = drive.shape[0]
+
+    def body(carry, k):
+        arrays, t = carry
+        arrays, spiked = _lif_step_jax(jnp, arrays, drive[k], dt, t)
+        # Carry ``t`` and add ``dt`` each step, exactly as the unrolled loop
+        # does. Computing ``k * dt`` instead differs in the last bits and can
+        # shift a refractory boundary by one step.
+        return (arrays, t + dt), jnp.sum(spiked.astype(dtype))
+
+    (_, _), counts = jax.lax.scan(body, (arrays0, jnp.asarray(0.0, dtype=dtype)), jnp.arange(steps))
+    return counts
+
+
 def spike_rate_loss(
     state: LIFState,
     i_inj_per_step: np.ndarray,

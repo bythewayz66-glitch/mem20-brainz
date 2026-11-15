@@ -35,7 +35,12 @@ jax = pytest.importorskip("jax", reason="jax is an optional extra: pip install '
 
 from mem20_brainz.connectome import SparseConnectome  # noqa: E402
 from mem20_brainz.simulation import LIFState, NumPyBackend, VectorizedEngine  # noqa: E402
-from mem20_brainz.simulation.jax_backend import JAXBackend  # noqa: E402
+from mem20_brainz.simulation.jax_backend import (  # noqa: E402
+    JAXBackend,
+    default_device_kind,
+    simulate_jax,
+    simulate_jax_scan,
+)
 
 #: Relative tolerance on the membrane potential. Measured drift is 5.881e-16;
 #: this bound is ~6 orders of magnitude looser so it is not flaky, while still
@@ -82,6 +87,37 @@ def _run_both(n: int, p: float, seed: int, steps: int, drive: float):
     jx = VectorizedEngine(state=LIFState.uniform(n), connectome=conn, dt=0.1, backend=JAXBackend())
     jx.run(steps=steps, external_current=external)
     return ref, jx
+
+
+def test_default_device_kind_is_known():
+    """The device a run used must be reportable, so a CPU result is never
+    mistaken for a GPU one. XLA chooses the device; this only reports it.
+    """
+    assert default_device_kind() in {"cpu", "gpu", "tpu"}
+
+
+def test_simulate_jax_scan_matches_the_python_loop():
+    """The device-resident ``lax.scan`` must reproduce the unrolled loop.
+
+    ``simulate_jax`` unrolls the timestep loop in Python; ``simulate_jax_scan``
+    runs it as one ``lax.scan`` so the state never leaves the device. They must
+    agree on spikes, or the GPU-shaped path would be a different simulation.
+    """
+    n, steps = 300, 200
+    state = LIFState.uniform(n)
+    drive = np.full((steps, n), 45.0)
+
+    loop = np.asarray(simulate_jax(state, drive, dt=0.1))
+    scan = np.asarray(simulate_jax_scan(state, drive, dt=0.1))
+
+    assert loop.shape == (steps,)
+    assert loop.sum() > 0, "vacuous: no spikes to compare"
+    assert scan.sum() == loop.sum(), (
+        f"scan and unrolled loop disagree on total spikes: {scan.sum()} vs {loop.sum()}"
+    )
+    # Per-step counts are integer sums of a boolean mask; they should match
+    # exactly, not merely in total.
+    assert np.array_equal(loop, scan), "per-step spike counts differ between scan and loop"
 
 
 def test_jax_enables_x64():

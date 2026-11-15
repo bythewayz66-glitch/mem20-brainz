@@ -194,6 +194,18 @@ straight-through estimator — forward pass is the true spike count, only the
 derivative is substituted with a sigmoid surrogate. It is a heuristic search,
 not exact gradient descent, and is documented as such.
 
+**Device residency.** `JAXBackend.step` steps one timestep at a time and copies
+the state back to NumPy each step. That round-trip is invisible on a CPU but
+fatal on a GPU — a host copy per timestep leaves the device idle. The
+GPU-shaped path is `simulate_jax_scan`, which runs the whole loop as one
+`lax.scan` and never leaves the device. Measured on CPU at 10⁵ neurons × 100
+steps: 0.201 s versus 0.508 s for the per-step path (2.53×). XLA selects the
+device automatically, and `default_device_kind()` reports which one a run used,
+so a CPU number can never be mistaken for a GPU one. **The Phase 1 exit
+criterion — 10⁶ neurons × 1 s on one GPU — has not been measured: no GPU is
+present in CI or on the development host.** The plumbing is device-agnostic;
+only the hardware is missing.
+
 **Planned:** the partitioner, and recurrent delivery inside the traced JAX loop.
 
 ### `io/` — **implemented (minimal)**

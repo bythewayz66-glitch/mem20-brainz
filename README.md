@@ -138,7 +138,10 @@ for one reason the others cannot offer — `jax.grad` through a simulation — a
 target (2.0 → 3.4746 nA, loss 2.56e+04 → 0, rate 0.00 → 40.00 Hz). The gradient
 is a **surrogate** (straight-through estimator): the forward pass is the true
 spike count, only the derivative is substituted, because a spike is
-discontinuous at threshold. See [ADR-0008](docs/adr/0008-jax-backend.md).
+discontinuous at threshold. See [ADR-0008](docs/adr/0008-jax-backend.md). The
+whole loop can run device-resident (`simulate_jax_scan`, one `lax.scan`, no
+per-step host round-trip), which is the shape a GPU run needs — but **no GPU
+run has been measured**, because neither CI nor the development host has one.
 
 **Precision:** state is `float64` by default, and that is the only
 reference-equivalent precision. `float32` is an explicit opt-in that halves
@@ -233,8 +236,11 @@ What is **not** implemented, and is not claimed:
 
 - [ ] Any measured connectome data, or any reader for it
 - [ ] Any biologically validated neuron or synapse model
-- [ ] Any GPU or distributed execution (all engines are single-process; the
-      scan-based paths are still O(synapses) per step)
+- [ ] Any GPU execution. The JAX path is device-agnostic and device-resident
+      (`simulate_jax_scan`), but no GPU run has been measured: CI and the
+      development host have no GPU. All measured numbers are single-machine CPU
+- [ ] Any distributed execution (all engines are single-process; the scan-based
+      paths are still O(synapses) per step)
 - [ ] Any exact gradient through spiking dynamics (the JAX fit uses a surrogate)
 - [ ] Any recurrent delivery inside the traced JAX loop (it is feedforward only)
 - [ ] Any region atlas or anatomical parcellation
