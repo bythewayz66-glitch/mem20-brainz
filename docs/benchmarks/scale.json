@@ -1,0 +1,59 @@
+{
+  "environment": {
+    "python": "3.13.5",
+    "platform": "Linux-6.1.145-android14-11-33419968-abS928USQS6DZI2-aarch64-with-glibc2.41",
+    "machine": "aarch64",
+    "processor": "Cortex-A520",
+    "cpu_count": 8,
+    "numpy": "2.5.4",
+    "numba": null,
+    "mem20_brainz": "0.0.1"
+  },
+  "scale": [
+    {
+      "n_neurons": 10000,
+      "n_synapses": 99946,
+      "steps": 100,
+      "peak_rss_mb_before": 40.8046875,
+      "numpy_s": 0.03904328099997656,
+      "numpy_neurons_per_s": 25612601.563905463,
+      "numpy_synapses_per_s": 255987707.59060952,
+      "event_driven_s": 0.024519999999029096,
+      "event_driven_neurons_per_s": 40783034.25936364,
+      "event_driven_synapses_per_s": 12228303.426259074,
+      "speedup": 1.5923034666200053,
+      "edge_hit_rate": 0.03,
+      "peak_rss_mb_after": 47.484375
+    },
+    {
+      "n_neurons": 100000,
+      "n_synapses": 999942,
+      "steps": 100,
+      "peak_rss_mb_before": 112.44921875,
+      "numpy_s": 0.3246748439996736,
+      "numpy_neurons_per_s": 30800045.59888247,
+      "numpy_synapses_per_s": 307982591.96237737,
+      "event_driven_s": 0.208910728999399,
+      "event_driven_neurons_per_s": 47867335.717490934,
+      "event_driven_synapses_per_s": 14359367.823605794,
+      "speedup": 1.5541319756756373,
+      "edge_hit_rate": 0.03,
+      "peak_rss_mb_after": 157.76953125
+    },
+    {
+      "n_neurons": 1000000,
+      "n_synapses": 9999950,
+      "steps": 100,
+      "peak_rss_mb_before": 777.5390625,
+      "numpy_s": 3.9677054159983527,
+      "numpy_neurons_per_s": 25203484.007856473,
+      "numpy_synapses_per_s": 252033579.90436435,
+      "event_driven_s": 2.6085266129994125,
+      "event_driven_neurons_per_s": 38335817.4310574,
+      "event_driven_synapses_per_s": 11500687.725591075,
+      "speedup": 1.5210523044793052,
+      "edge_hit_rate": 0.03,
+      "peak_rss_mb_after": 1283.0390625
+    }
+  ]
+}

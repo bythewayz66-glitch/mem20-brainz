@@ -119,6 +119,27 @@ Two caveats worth keeping:
   the event-driven path is still gated on a tolerance test rather than
   bit-identity. See ADR-0006.
 
+## Scale runs (`--scale`)
+
+`baseline.json` is small on purpose: it has to run in CI on every push, so it
+stops at a few tens of thousands of neurons. That answers "did anything
+regress?", not "where does this break?". `--scale` answers the second question:
+
+```bash
+python scripts/benchmark.py --scale --markdown
+```
+
+It sweeps **10⁴, 10⁵ and 10⁶ neurons** (10⁶ is the Phase 1 exit target) on the
+two vectorised paths, with a fixed mean out-degree of 10 so the edge count grows
+linearly with the population. It writes `scale.json` — a separate file, never
+touched by `--check` and never run in CI — and reports **peak RSS** next to time,
+because at 10⁶ the memory wall matters as much as the clock. The reference loop
+is excluded: it is a correctness oracle, not a scale path, and at 10⁶ neurons it
+would take hours.
+
+The committed `scale.json` is one machine's measurement, and says so. It is a
+data point, not a projection — nothing in it extrapolates to 86 × 10⁹ neurons.
+
 ## Configuration
 
 Fixed in `scripts/benchmark.py` as `CONFIG`:
@@ -139,4 +160,5 @@ Changing any of these invalidates the committed baseline, which is exactly what
 ## Files
 
 - `baseline.json` — the committed results, with environment metadata
-- `scripts/benchmark.py` — the harness (`--check`, `--markdown`, `--out`)
+- `scale.json` — the opt-in `--scale` sweep up to 10⁶ neurons (not used by CI)
+- `scripts/benchmark.py` — the harness (`--check`, `--markdown`, `--scale`, `--out`)

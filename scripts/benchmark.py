@@ -27,6 +27,16 @@ metadata attached, so a number in the docs can always be traced to a run. The
 ``--check`` mode fails if the committed baseline no longer matches the current
 code, which is what stops the docs from silently drifting away from reality.
 
+Scale runs (``--scale``)
+------------------------
+The committed baseline is small on purpose: it must run in CI on every push, so
+it tops out at a few tens of thousands of neurons. ``--scale`` is the other
+question — *where does this break?* — and sweeps up to 10^6 neurons, the Phase 1
+exit target. It is opt-in, never runs in CI, writes to its own file
+(``docs/benchmarks/scale.json``), and reports peak RSS alongside time, because
+at 10^6 the memory wall is as interesting as the clock. The reference loop is
+excluded: it is a correctness oracle, not a scale path.
+
 Honesty
 -------
 These numbers come from **one specific machine** (recorded in the JSON). They
@@ -60,6 +70,7 @@ from mem20_brainz.simulation import (
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUT = REPO_ROOT / "docs" / "benchmarks" / "baseline.json"
+DEFAULT_SCALE_OUT = REPO_ROOT / "docs" / "benchmarks" / "scale.json"
 
 #: Fixed benchmark configuration. Changing any of these invalidates the
 #: committed baseline, which is exactly what ``--check`` is for.
@@ -238,6 +249,110 @@ def measure_crossover(steps: int = 100, drive: float = 45.0) -> list[dict]:
     return rows
 
 
+#: Sizes swept by ``--scale``. 10^6 is the Phase 1 exit target; the smaller
+#: rows are there so a wall can be attributed to a size rather than guessed at.
+SCALE_SIZES = (10_000, 100_000, 1_000_000)
+
+#: Steps per size. 100 matches the crossover sweep: enough for the population
+#: to reach a firing regime, so the event-driven row measures real delivery
+#: rather than an idle network (the hit rate is recorded to make that visible).
+SCALE_STEPS = 100
+
+#: Fixed mean out-degree, so edges grow linearly with the population and the
+#: sweep is about size, not density.
+SCALE_MEAN_OUT_DEGREE = 10.0
+
+
+def _peak_rss_mb() -> float | None:
+    """Process high-water RSS in MiB, or ``None`` where unavailable."""
+    try:
+        import resource
+    except ImportError:  # pragma: no cover - non-POSIX
+        return None
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    # Linux reports kibibytes, macOS reports bytes.
+    return rss / 1024 if sys.platform != "darwin" else rss / (1024 * 1024)
+
+
+def measure_scale(sizes: tuple[int, ...] = SCALE_SIZES, steps: int = SCALE_STEPS) -> list[dict]:
+    """Sweep population size on the vectorised paths to find the wall.
+
+    ``peak_rss_mb`` is the process high-water mark, so it is monotonically
+    non-decreasing across rows: it shows the ceiling each row pushed the process
+    to, not that row's working set. It is recorded for exactly that reason — the
+    question at 10^6 is how close the process gets to the machine's limit.
+    """
+    rows: list[dict] = []
+    for n in sizes:
+        p = SCALE_MEAN_OUT_DEGREE / n
+        conn = build_connectome(n, p, seed=1)
+        external = np.full(n, 45.0, dtype=np.float64)
+        row: dict = {
+            "n_neurons": n,
+            "n_synapses": conn.n_synapses,
+            "steps": steps,
+            "peak_rss_mb_before": _peak_rss_mb(),
+        }
+
+        scan = VectorizedEngine(
+            state=LIFState.uniform(n), connectome=conn, dt=0.1, backend=NumPyBackend()
+        )
+        start = time.perf_counter()
+        scan.run(steps=steps, external_current=external)
+        scan_s = time.perf_counter() - start
+        row["numpy_s"] = scan_s
+        row["numpy_neurons_per_s"] = n * steps / scan_s
+        row["numpy_synapses_per_s"] = conn.n_synapses * steps / scan_s
+
+        csr = CSRConnectome.from_sparse(conn)
+        ev = EventDrivenEngine(state=LIFState.uniform(n), connectome=csr, dt=0.1)
+        start = time.perf_counter()
+        ev.run(steps=steps, external_current=external)
+        ev_s = time.perf_counter() - start
+        row["event_driven_s"] = ev_s
+        row["event_driven_neurons_per_s"] = n * steps / ev_s
+        row["event_driven_synapses_per_s"] = ev.edges_visited / ev_s
+        row["speedup"] = scan_s / ev_s
+        row["edge_hit_rate"] = ev.edges_visited / (conn.n_synapses * steps)
+        row["peak_rss_mb_after"] = _peak_rss_mb()
+
+        rows.append(row)
+        print(
+            f"  {n:>9,} neurons  {conn.n_synapses:>11,} synapses  "
+            f"numpy {scan_s:.3f}s  event-driven {ev_s:.3f}s  "
+            f"peak RSS {row['peak_rss_mb_after']:.0f} MiB",
+            file=sys.stderr,
+        )
+    return rows
+
+
+def render_scale_markdown(payload: dict) -> str:
+    env = payload["environment"]
+    lines = [
+        "Scale sweep: where the vectorised paths run out of room.",
+        "",
+        "| neurons | synapses | numpy (s) | event-driven (s) | speedup | "
+        "edge hit rate | numpy neurons/s | peak RSS (MiB) |",
+        "|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for row in payload["scale"]:
+        lines.append(
+            f"| {row['n_neurons']:,} | {row['n_synapses']:,} | {row['numpy_s']:.3f} | "
+            f"{row['event_driven_s']:.3f} | {row['speedup']:.2f}x | "
+            f"{row['edge_hit_rate'] * 100:.2f}% | "
+            f"{row['numpy_neurons_per_s']:,.0f} | {row['peak_rss_mb_after']:.0f} |"
+        )
+    lines += [
+        "",
+        f"Measured on: {env['processor']} ({env['cpu_count']} cores), "
+        f"Python {env['python']}, NumPy {env['numpy']}.",
+        "",
+        "Peak RSS is a process high-water mark, so it is non-decreasing down the "
+        "column. This is a single-machine measurement, not a scaling projection.",
+    ]
+    return "\n".join(lines)
+
+
 def environment() -> dict:
     """Machine and environment metadata, so a number can be traced to a run."""
     try:
@@ -316,24 +431,44 @@ def render_markdown(payload: dict) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="baseline JSON path")
+    parser.add_argument("--out", type=Path, default=None, help="output JSON path")
     parser.add_argument(
         "--check",
         action="store_true",
         help="re-run and fail if the committed baseline is stale relative to the code",
     )
+    parser.add_argument(
+        "--scale",
+        action="store_true",
+        help="sweep up to 10^6 neurons to find the memory and time wall (opt-in, not CI)",
+    )
     parser.add_argument("--markdown", action="store_true", help="print a Markdown table")
     args = parser.parse_args(argv)
 
+    if args.scale:
+        if args.check:
+            parser.error("--scale and --check are mutually exclusive")
+        out = args.out or DEFAULT_SCALE_OUT
+        print(f"scale sweep: {', '.join(f'{n:,}' for n in SCALE_SIZES)} neurons", file=sys.stderr)
+        payload = {"environment": environment(), "scale": measure_scale()}
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(payload, indent=2) + "\n")
+        print(f"wrote {out}")
+        if args.markdown:
+            print()
+            print(render_scale_markdown(payload))
+        return 0
+
+    out = args.out or DEFAULT_OUT
     payload = run_benchmarks(CONFIG)
     payload["environment"] = environment()
     payload["crossover"] = measure_crossover()
 
     if args.check:
-        if not args.out.exists():
-            print(f"FAIL: no committed baseline at {args.out}", file=sys.stderr)
+        if not out.exists():
+            print(f"FAIL: no committed baseline at {out}", file=sys.stderr)
             return 1
-        committed = json.loads(args.out.read_text())
+        committed = json.loads(out.read_text())
         problems = []
 
         if committed.get("config") != payload["config"]:
@@ -372,12 +507,12 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
 
-        print(f"OK: baseline at {args.out} matches the current code.")
+        print(f"OK: baseline at {out} matches the current code.")
         return 0
 
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(payload, indent=2) + "\n")
-    print(f"wrote {args.out}")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, indent=2) + "\n")
+    print(f"wrote {out}")
 
     if args.markdown:
         print()
