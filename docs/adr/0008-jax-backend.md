@@ -99,10 +99,24 @@ form is `soft + stop_gradient(hard - soft)`.
    of width `kappa = 2.0` mV. The reported rate is therefore a real measurement
    of a real simulation, and the gradient is a heuristic.
 
-5. **`simulate_jax` is feedforward only.** No recurrent synaptic delivery inside
-   the traced loop. A recurrent scatter is possible but is separate work with its
-   own equivalence question, and pretending otherwise would overstate what the
-   backend does.
+5. **`simulate_jax` is feedforward only; recurrent delivery is a separate entry
+   point.** The differentiable fitting path (`simulate_jax`, `spike_rate_loss`)
+   stays feedforward, because that is the shape a 1-D parameter fit needs. A
+   recurrent traced loop is added alongside it as `simulate_jax_recurrent`: it
+   scatters the previous step's spikes into their postsynaptic neurons with a
+   dense scatter-add over the edge list, matching `VectorizedEngine._deliver`'s
+   one-step rule. It is not bit-identical for the same reason the event-driven
+   path is not — a scatter-add reassociates the float additions — so it carries
+   its own tolerance test.
+
+6. **The loop is device-resident.** `simulate_jax_scan` runs the whole timestep
+   loop as one `lax.scan`, so state never round-trips to the host mid-run. That
+   round-trip is free on a CPU and fatal on a GPU, where a host copy per step
+   leaves the device idle; the scan is the shape a GPU run needs.
+   `default_device_kind()` reports which device a run used, so a CPU number can
+   never be read as a GPU one. **No GPU run has been measured** — none is
+   available in CI or on the development host — so the Phase 1 exit criterion is
+   not yet met by measurement, only by construction.
 
 ## Consequences
 
@@ -161,6 +175,10 @@ not the best possible solver for a 1-D root-find.
   that it needs a better surrogate.
 - What is the crossover where JAX's `jit` compilation cost is amortised? At 200
   neurons it is not; at 10⁶ it may be. Unmeasured.
-- Can recurrent delivery be traced without a scatter that destroys the gradient?
-  `jax.lax.segment_sum` or a dense matmul over a partition would work; both need
-  their own equivalence test.
+- ~~Can recurrent delivery be traced without a scatter that destroys the
+  gradient?~~ **Resolved.** `simulate_jax_recurrent` traces a dense scatter-add
+  (`.at[post].add`) inside `lax.scan`; `jax.grad` flows through it, and the
+  spike counts match the reference within the 1% tolerance. The **sparse**
+  event-driven form stays untraced — its work depends on which neurons fired,
+  which a static-shape trace cannot express — so the traced path is O(edges) per
+  step, not O(active edges).

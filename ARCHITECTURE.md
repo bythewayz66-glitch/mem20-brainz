@@ -206,7 +206,9 @@ criterion — 10⁶ neurons × 1 s on one GPU — has not been measured: no GPU 
 present in CI or on the development host.** The plumbing is device-agnostic;
 only the hardware is missing.
 
-**Planned:** the partitioner, and recurrent delivery inside the traced JAX loop.
+**Planned:** the partitioner, and sparse recurrent delivery inside the traced JAX
+loop (the traced path is a dense scatter-add; a static-shape trace cannot express
+work that depends on which neurons fired).
 
 ### `io/` — **implemented (minimal)**
 

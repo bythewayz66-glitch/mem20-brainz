@@ -39,6 +39,7 @@ from mem20_brainz.simulation.jax_backend import (  # noqa: E402
     JAXBackend,
     default_device_kind,
     simulate_jax,
+    simulate_jax_recurrent,
     simulate_jax_scan,
 )
 
@@ -118,6 +119,64 @@ def test_simulate_jax_scan_matches_the_python_loop():
     # Per-step counts are integer sums of a boolean mask; they should match
     # exactly, not merely in total.
     assert np.array_equal(loop, scan), "per-step spike counts differ between scan and loop"
+
+
+def test_simulate_jax_recurrent_matches_numpy_within_tolerance():
+    """The recurrent traced loop must match the reference engine's spikes.
+
+    Delivery differs only in the order of float additions (scatter-add vs
+    ``np.add.at``), so the gate is the same spike-count tolerance as the other
+    non-bit-identical paths (ADR-0006), not bit-identity.
+    """
+    n, p, seed, steps, drive = 200, 0.05, 1234, 300, 45.0
+    conn = _connectome(n, p, seed)
+    external = np.full(n, drive)
+
+    ref = VectorizedEngine(
+        state=LIFState.uniform(n), connectome=conn, dt=0.1, backend=NumPyBackend()
+    )
+    ref.run(steps=steps, external_current=external)
+    ref_counts = np.array([len(s) for s in ref.spike_history])
+    assert ref_counts.sum() > 0, "vacuous: the reference network never spiked"
+
+    jx_counts = np.asarray(
+        simulate_jax_recurrent(
+            LIFState.uniform(n),
+            conn.pre,
+            conn.post,
+            conn.weight,
+            np.full((steps, n), drive),
+            dt=0.1,
+        )
+    )
+
+    rel = abs(jx_counts.sum() - ref_counts.sum()) / ref_counts.sum()
+    assert rel <= SPIKE_COUNT_TOL, (
+        f"recurrent spike count drifted {rel:.4%} (numpy={ref_counts.sum()}, jax={jx_counts.sum()})"
+    )
+
+
+def test_simulate_jax_recurrent_is_differentiable():
+    """The whole point of the recurrent path: a gradient through delivery.
+
+    Only that the gradient is *computable* is asserted. It is not the derivative
+    of the model — the spike test is discontinuous, so the true derivative is
+    zero almost everywhere (ADR-0008). Proving the graph is traceable by
+    ``jax.grad`` is the meaningful, honest claim here.
+    """
+    n, steps = 50, 20
+    conn = _connectome(n, 0.1, 5)
+    drive = np.full((steps, n), 45.0)
+    state = LIFState.uniform(n)
+
+    def total_spikes(scale):
+        counts = simulate_jax_recurrent(
+            state, conn.pre, conn.post, conn.weight * scale, drive, dt=0.1
+        )
+        return counts.sum().astype(float)
+
+    grad = jax.grad(total_spikes)(1.0)
+    assert np.isfinite(np.asarray(grad))
 
 
 def test_jax_enables_x64():

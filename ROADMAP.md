@@ -54,6 +54,11 @@ can be built behind them without changing callers. **Met.**
 - [x] Numeric precision decision: float64 default, float32 as a tested opt-in
       (ADR-0007)
 - [x] Benchmark harness with a recorded baseline (synapses/s, neurons/s)
+- [x] Opt-in scale sweep (`--scale`) up to 10⁶ neurons, reporting peak RSS —
+      one machine's measurement, not a projection
+- [x] Device-resident JAX loop (`simulate_jax_scan`, one `lax.scan`) and device
+      reporting (`default_device_kind()`); recurrent delivery traced
+      (`simulate_jax_recurrent`, dense scatter-add, tolerance-gated) — ADR-0008
 - [x] Live observability layer: streaming server, frame schema, React frontend,
       headless mode (ADR-0009)
 - [x] Affective readout proxies with inputs, formula and `derived_proxy` tag
@@ -62,6 +67,12 @@ can be built behind them without changing callers. **Met.**
 **Exit criterion:** 10⁶ LIF neurons for 1 second of biological time (10,000
 steps) on a single GPU, with spike output bit-identical to the reference
 implementation on a 10⁴-neuron test case.
+
+**Status of the exit criterion:** the code is device-agnostic and
+device-resident, so a GPU run is a `--scale` invocation away — but **no GPU run
+has been measured.** CI and the development host have no GPU. The 10⁶-neuron
+numbers in `docs/benchmarks/scale.json` are CPU numbers, labelled as such, and
+are not the exit criterion.
 
 **Note on CSR event-driven delivery:** it is *not* bit-identical to the
 reference, because summing incoming weights in CSR order rather than edge order

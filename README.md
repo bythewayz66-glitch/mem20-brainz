@@ -196,6 +196,9 @@ What is **actually implemented** in this repository today:
       reference, optional dependency
 - [x] `simulation` — `JAXBackend`: XLA-compiled, tolerance-gated (ADR-0008),
       optional dependency, with `jax_enable_x64` enforced
+- [x] `simulation` — `simulate_jax_scan` (device-resident whole-loop `lax.scan`)
+      and `simulate_jax_recurrent` (traced recurrent delivery, dense
+      scatter-add, tolerance-gated, differentiable), with `default_device_kind()`
 - [x] `scripts/fit_jax_example.py` — gradient-based parameter fitting via a
       straight-through estimator (surrogate gradient, ADR-0008)
 - [x] `simulation` — `precision` mode: `float64` default, `float32` opt-in,
@@ -242,7 +245,9 @@ What is **not** implemented, and is not claimed:
 - [ ] Any distributed execution (all engines are single-process; the scan-based
       paths are still O(synapses) per step)
 - [ ] Any exact gradient through spiking dynamics (the JAX fit uses a surrogate)
-- [ ] Any recurrent delivery inside the traced JAX loop (it is feedforward only)
+- [ ] Any **sparse** recurrent delivery inside the traced JAX loop: the traced
+      path (`simulate_jax_recurrent`) is a dense scatter-add, so it is O(edges)
+      per step, not O(active edges)
 - [ ] Any region atlas or anatomical parcellation
 - [ ] Any plasticity
 - [ ] Any brain-scale run of any kind

@@ -308,6 +308,75 @@ def simulate_jax_scan(
     return counts
 
 
+def simulate_jax_recurrent(
+    state: LIFState,
+    pre: np.ndarray,
+    post: np.ndarray,
+    weight: np.ndarray,
+    i_inj_per_step: np.ndarray,
+    dt: float = 0.1,
+):
+    """Recurrent LIF network traced in one ``lax.scan`` — differentiable.
+
+    This is the piece :func:`simulate_jax` deliberately left out. Delivery
+    mirrors ``VectorizedEngine._deliver``: the spikes from step ``k-1`` are
+    scattered into their postsynaptic neurons, weighted, and added to the
+    external drive at step ``k`` — the reference's one-step delay rule.
+
+    It is a **dense scatter over the edge list**, not the sparse event-driven
+    path. A traced loop needs static shapes, and the sparse path's work depends
+    on which neurons fired; the differentiable form is therefore O(edges) per
+    step, the same order as the scan-based engines.
+
+    Not bit-identical: a scatter-add reassociates the float additions relative to
+    the reference's ``np.add.at``, exactly as the event-driven path does
+    (ADR-0006). Gate it on a tolerance test. Returns per-step spike counts.
+
+    The gradient caveat from :mod:`~mem20_brainz.simulation.jax_backend` still
+    applies: the loop is differentiable, but the spike test is discontinuous, so
+    a gradient *through the spike train* is not the derivative of the model.
+    """
+    jax, jnp = _require_jax()
+    dtype = _DTYPES[state.precision]
+
+    pre = jnp.asarray(np.asarray(pre, dtype=np.int64))
+    post = jnp.asarray(np.asarray(post, dtype=np.int64))
+    # weight and drive go through jnp.asarray, not np.asarray: they are the
+    # quantities a caller may want to differentiate with respect to, so they can
+    # arrive as traced arrays. Forcing them to NumPy would break jax.grad.
+    w = jnp.asarray(weight, dtype=dtype)
+    n = state.v.shape[0]
+    drive = jnp.asarray(i_inj_per_step, dtype=dtype)
+    steps = drive.shape[0]
+
+    arrays0 = tuple(
+        jnp.asarray(a)
+        for a in (
+            state.v,
+            state.v_rest,
+            state.v_reset,
+            state.v_threshold,
+            state.tau_m,
+            state.r_m,
+            state.refractory_ms,
+            state.refractory_until,
+        )
+    )
+    zeros = jnp.zeros(n, dtype=dtype)
+
+    def body(carry, k):
+        arrays, prev_spikes, t = carry
+        contribution = jnp.where(prev_spikes[pre], w, jnp.asarray(0.0, dtype=dtype))
+        incoming = jnp.zeros(n, dtype=dtype).at[post].add(contribution)
+        arrays, spiked = _lif_step_jax(jnp, arrays, drive[k] + incoming, dt, t)
+        return (arrays, spiked, t + dt), jnp.sum(spiked.astype(dtype))
+
+    (_, _, _), counts = jax.lax.scan(
+        body, (arrays0, zeros > 0, jnp.asarray(0.0, dtype=dtype)), jnp.arange(steps)
+    )
+    return counts
+
+
 def spike_rate_loss(
     state: LIFState,
     i_inj_per_step: np.ndarray,
