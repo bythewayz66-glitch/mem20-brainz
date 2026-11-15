@@ -261,3 +261,201 @@ baked in from commit one, this is that place.
 
 See [`ROADMAP.md`](ROADMAP.md) for the detailed version and
 [`docs/roadmap.md`](docs/roadmap.md) for the technical breakdown.
+
+## Install and run
+
+Requires Python ≥ 3.10.
+
+```bash
+# clone
+git clone https://github.com/bythewayz66-glitch/mem20-brainz.git
+cd mem20-brainz
+
+# install (editable, with dev tools)
+pip install -e ".[dev]"
+
+# run the test suite
+pytest
+
+# micro-benchmark every engine path (writes docs/benchmarks/baseline.json)
+python scripts/benchmark.py --markdown
+
+# fail if the committed baseline is stale relative to the code
+python scripts/benchmark.py --check
+
+# validate a small connectome fixture
+python scripts/ingest_connectome.py data/fixtures/tiny_connectome.json
+```
+
+Minimal usage:
+
+```python
+import numpy as np
+from mem20_brainz.connectome import SparseConnectome
+from mem20_brainz.neurons import LIFNeuron
+from mem20_brainz.simulation import SimulationEngine
+
+neurons = [LIFNeuron(id=i) for i in range(4)]
+conn = SparseConnectome.from_arrays(n_neurons=4, pre=[0, 1], post=[2, 3])
+engine = SimulationEngine(neurons=neurons, connectome=conn, dt=0.1)
+
+spikes = engine.run(steps=100, external_current=np.full(4, 50.0))
+print(f"{spikes} spikes in {engine.t:.1f} ms of simulated time")
+```
+
+The vectorised path — same semantics, bit-identical output:
+
+```python
+import numpy as np
+from mem20_brainz.connectome import SparseConnectome
+from mem20_brainz.simulation import LIFState, VectorizedEngine
+
+conn = SparseConnectome.from_arrays(n_neurons=4, pre=[0, 1], post=[2, 3])
+engine = VectorizedEngine(state=LIFState.uniform(4), connectome=conn, dt=0.1)
+
+spikes = engine.run(steps=100, external_current=np.full(4, 50.0))
+print(f"{spikes} spikes in {engine.t:.1f} ms of simulated time")
+```
+
+## Watching it run
+
+There is a live observability layer: a streaming server over the existing engine,
+and a web frontend that renders the population, the spike timeline, and the
+derived readouts in real time.
+
+```bash
+# install the server extra
+pip install -e ".[dev,server]"
+
+# start backend + frontend together (Ctrl-C stops both)
+./scripts/dev.sh
+# → backend  http://127.0.0.1:8000
+# → frontend http://127.0.0.1:5173   ← open this
+```
+
+Or run the halves separately:
+
+```bash
+python -m mem20_brainz.server            # backend only, port 8000
+cd web && npm install && npm run dev     # frontend only, port 5173
+```
+
+No browser? The headless mode prints the same numbers the frontend receives:
+
+```bash
+python -m mem20_brainz.server.headless --steps 400 --stimulus threat --every 50
+```
+
+```
+mem20-brainz — headless run
+====================================================================
+backend      : numpy
+neurons      : 580
+synapses     : 30,729
+data kind    : synthetic  (synthetic — not measured)
+steps        : 2,600
+total spikes : 2,036
+throughput   : 666.4 steps/s
+stimulus     : threat @ 6.0 for 200.0 ms
+
+  step      t_ms  spikes  readouts
+--------------------------------------------------------------------
+  1004     100.4       0  arousal=0.216  valence=-0.058  surprise=0.024  confusion=0.187  fear_like=0.000
+  1204     120.4       0  arousal=0.269  valence=0.019  surprise=0.022  confusion=0.197  fear_like=0.000
+  1404     140.4      11  arousal=1.000  valence=0.404  surprise=0.955  confusion=0.804  fear_like=0.163
+  1604     160.4       0  arousal=1.000  valence=-0.185  surprise=0.831  confusion=1.000  fear_like=0.352
+  ...
+
+NOTE: the readouts above are derived proxies over simulation state.
+      The model has no feelings. See docs/readout.md.
+```
+
+(`steps` counts the warm-up plus the requested steps, which is why `--steps 400`
+reports 2,600 — the runner advances `WARMUP_STEPS` before serving so the network
+is already firing. Throughput is machine-dependent.)
+
+### What you are looking at
+
+- **Population** — one dot per neuron, coloured by region, brightness driven by
+  membrane potential, white rings on spikes. The coordinates are *display*
+  coordinates from the scenario, not soma positions in any anatomical space.
+- **Timeline** — spikes per frame on top, readout traces below.
+- **Affective readout** — five gauges. Expand any one to see the measured inputs
+  and the exact formula behind the number.
+- **Controls** — play/pause, reset, stimulus injection (pick a region, strength,
+  duration), and sliders for steps-per-frame, baseline rate and tonic drive.
+- **Status bar** — backend, engine, neuron/synapse counts, steps/s, and a
+  provenance chip that says `data: synthetic — not measured`.
+
+### The readouts are proxies, not feelings
+
+**The model does not have feelings.** It is a leaky integrate-and-fire network
+with placeholder parameters and synthetic connectivity. The named states
+(arousal, valence, surprise, confusion, fear-like) are a fixed, documented mapping
+from *measurable* simulation quantities — firing rates, excitatory/inhibitory
+drive, cross-region dispersion, population synchrony — onto legible labels.
+
+Every readout returns its raw inputs and its formula, is tagged
+`provenance="derived_proxy"`, and is labelled as such in the UI. The mapping is a
+design choice, not a finding. Read [`docs/readout.md`](docs/readout.md) before
+using any of these numbers in a claim.
+
+## Repository layout
+
+```
+mem20-brainz/
+├── README.md              # this file — the mission document
+├── ARCHITECTURE.md        # system design and module boundaries
+├── ROADMAP.md             # phased plan with exit criteria
+├── CONTRIBUTING.md        # how to contribute, and the honesty rules
+├── LICENSE                # MIT
+├── pyproject.toml         # installable package config
+├── configs/               # example simulation and region configs
+├── data/                  # schemas + tiny fixtures ONLY (see data/README.md)
+│   ├── schemas/
+│   └── fixtures/
+├── docs/
+│   ├── architecture.md
+│   ├── roadmap.md
+│   ├── data-model.md
+│   ├── glossary.md
+│   ├── readout.md         # what the affective proxies are, and are not
+│   ├── adr/               # architecture decision records 0001-0009
+│   └── benchmarks/        # committed baseline.json + how to run it
+├── .github/workflows/     # CI: pytest + ruff, numba, server, frontend, benchmark
+├── scripts/               # ingestion, build, benchmark, dev.sh
+├── web/                   # React + Vite frontend for the live stream
+│   └── src/
+│       ├── components/    # canvas, timeline, gauges, controls, status bar
+│       └── lib/           # wire types, WebSocket hook, REST client
+├── src/mem20_brainz/
+│   ├── neurons/           # neuron models
+│   ├── synapses/          # synapse models
+│   ├── regions/           # region containers
+│   ├── connectome/        # sparse storage + CSR view
+│   ├── simulation/        # reference engine, Backend protocol, NumPy/Numba/JAX, event-driven
+│   ├── scenarios/         # synthetic demo network (provenance-tagged)
+│   ├── readout/           # affective proxies (derived_proxy, not feelings)
+│   ├── server/            # FastAPI streaming server + headless mode
+│   ├── io/                # config and fixture I/O
+│   └── viz/               # plotting (optional)
+└── tests/                 # smoke, equivalence, event-driven, readout and server tests
+```
+
+## How to contribute
+
+Read [`CONTRIBUTING.md`](CONTRIBUTING.md) first — it contains the two rules that
+matter more than any style guide:
+
+1. **Never claim a capability the code does not have.** If a module is a
+   placeholder, its docstring says so.
+2. **Never mix measured and synthetic data silently.** Every dataset carries a
+   `measured` flag; every figure derived from a run states which parts were
+   synthetic.
+
+Then: open an issue describing the interface you want to change before changing
+it, keep commits small and well-messaged, and make sure `pytest` passes.
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).
