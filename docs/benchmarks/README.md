@@ -140,6 +140,11 @@ would take hours.
 The committed `scale.json` is one machine's measurement, and says so. It is a
 data point, not a projection — nothing in it extrapolates to 86 × 10⁹ neurons.
 
+A scheduled workflow (`.github/workflows/scale.yml`, weekly + manual dispatch)
+runs this sweep and uploads the artifact, so the large-population numbers are
+refreshed without putting minutes of wall clock in front of every pull request.
+It is a measurement, not a gate: nothing asserts on the timings.
+
 ## Configuration
 
 Fixed in `scripts/benchmark.py` as `CONFIG`:
