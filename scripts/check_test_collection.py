@@ -23,11 +23,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 TESTS = ROOT / "tests"
 
-#: Loose sanity floor. The suite collects 112 tests today, 14 of them in
+#: Loose sanity floor. The suite collects 127 tests today, 14 of them in
 #: ``test_event_driven.py`` — the module this guard was written to protect. It
-#: sits below that so ordinary churn does not trip it, while a whole module
-#: disappearing still does.
-TOTAL_FLOOR = 100
+#: sits a little below that so ordinary churn does not trip it, while a whole
+#: module disappearing still does. The per-module check below is the primary
+#: guard; this is the backstop for a loss spread across several modules.
+TOTAL_FLOOR = 120
 
 #: One line per module in `pytest --collect-only -q`, e.g. "tests/test_smoke.py: 10".
 COUNT_LINE = re.compile(r"^(tests/[^:]+\.py):\s+(\d+)\s*$")
