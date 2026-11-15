@@ -47,6 +47,12 @@ jobs:
       - name: Run tests
         run: pytest -q
 
+      - name: Guard against gutted test modules
+        # A commit that empties a test module still passes `pytest` — the module
+        # just collects nothing. Fail when a module collects no tests, or when
+        # the suite shrinks past the floor in scripts/check_test_collection.py.
+        run: python scripts/check_test_collection.py
+
       - name: Run slow equivalence tests
         # The 10^4-neuron bit-identity case. Kept as a separate step so a
         # failure is unambiguous in the job log.
